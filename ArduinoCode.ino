@@ -565,6 +565,10 @@ void SendData(){
   root["flows"][0] = vazao_quente;
   root["flows"][1] = vazao_fria;
 
+  root["status"][0] = pump_onoff;
+  root["stauts"][1] = pot_value_mapped;
+  root["status"][2] = heater_onoff;
+
   //imprime
   root.printTo(Serial);
   Serial.println();

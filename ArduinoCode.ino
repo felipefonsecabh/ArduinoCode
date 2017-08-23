@@ -15,14 +15,14 @@ Description: Primeira vers�o do c�digo para testar o funcionamento dos equip
 //display lcd
 #include <LiquidCrystal.h>
 
-//Lib Json
-#include <ArduinoJson.h>
+//lib i2c
+#include <Wire.h>
 
 //timed action
 //#include <Utility.h>
 //#include <TimedAction.h>
 
-//Pinos de entrada e sa�da
+//Pinos de entrada e saída
 
 #define but1 A1  //no programa de testes 42; no original, trocar por A1
 #define but2 A2  //no programa de testes 44; no original trocar por A2
@@ -66,6 +66,28 @@ float vazao_fria;
 volatile int flow_frequency;
 int emergency_status;
 
+//estrutura de dados para envio i2c
+typedef struct processData{
+  float temp1;
+  float temp2;
+  float temp3;
+  float temp4;
+  float hotflow;
+  float coldflow;
+  byte pump_speed;
+  byte bstatus;
+  byte chksum;
+};
+
+typedef union I2C_Send{ //compartilha a mesma área de memória
+  processData data;
+  byte I2C_packet[sizeof(processData)];
+};
+
+I2C_Send send_info;
+int command; //processar o indice de comando enviado pelo Rpi
+byte data[12];  //processar as informações de comando
+
 //vari�veis utilizadas no calculo de vazao de agua fria/quente
 unsigned long currentTime;
 unsigned long cloopTime;
@@ -106,19 +128,9 @@ Ultrasonic ultrasonic(ultrassonico_trigger, ultrassonico_echo);
 
 LiquidCrystal lcd(41, 11, 12, 40, 13, 38);  //no original deve-se utilizar  LiquidCrystal lcd(41, 11, 12, 40, 13, 38);
 
-//objetos Json
-StaticJsonBuffer<350> jsonBuffer;
-StaticJsonBuffer<100> jsonRead;
-JsonObject &root = jsonBuffer.createObject();
+//funções
 
-//temporiaza��o
-long CurrentMillis;
-long PreviousMillis = 0;
-long interval = 200; //intervalo de envio em milissegundos
-
-//fun��es
-
-//fun��es de navega��o  - Display LCD
+//funções de navegação  - Display LCD
 void changeMenu();
 void dispMenu();
 void Introduction();
@@ -129,29 +141,18 @@ void HeaterCommand();
 void ChangePID();
 void EmergencyStatus();
 
-//fun��es de leitura de grandezes
-void flow();                //fun��o de interrup��o para o calculo de vazao de �gua fria
-void PumpSpeed(float ref);  //fun��o para alterar a velocidade da bomba
-void VazaoAguaFria();       //fun��o para calcular a vaz�o de �gua fria
-void VazaoAguaQuente();     //fun��o para calcular a vaz�o de �gua quente
-void Temperaturas();        //fun��o para calcular as temperaturas dos sensores
+//funções de leitura de grandezes
+void flow();                //função de interrupção para o calculo de vazao de �gua fria
+void PumpSpeed(float ref);  //função para alterar a velocidade da bomba
+void VazaoAguaFria();       //função para calcular a vaz�o de �gua fria
+void VazaoAguaQuente();     //função para calcular a vaz�o de �gua quente
+void Temperaturas();        //função para calcular as temperaturas dos sensores
 
-//fun��o de emergencia
+//função de emergencia
 void emergencia();
 
-//fun��es auxiliares
-void set_rnd_values();     //fun��o para gerar valores para as grandezas para testar o menu
-
-//fun��o de transmiss�o de mensagem
-void CreateStructure();
-void SendData();
-
-//vari�veis para receber comandos
-boolean stringComplete = false;
-String inputString ="";
-
-//função para interpretar comandos recebidos
-void ReceiveCommand(String inputString);
+//funções auxiliares
+void set_rnd_values();     //função para gerar valores para as grandezas para testar o menu
 
 //funções para fazerem a leitura periodica dos valores
 void runReads();
@@ -160,7 +161,7 @@ void runReads();
 void CalcParams();
 void Temperaturas2();
 
-// inicializa��es e declara��es de vari�veis
+// inicializações e declarações de variáveis
 void setup() {
 
   //painel
@@ -186,7 +187,7 @@ void setup() {
   //começar inversor desligado
   digitalWrite(inversor_rele, HIGH);
 
-  //habilitar a interrup��o
+  //habilitar a interrupção
   attachInterrupt(hf_sensor, flow, RISING);
 
   //iniciar lcd
@@ -204,7 +205,7 @@ void setup() {
   pumpstatus = 0x00;
   heaterstatus = 0x00;
 
-  //resolu��o de escrita
+  //resolução de escrita
   analogWriteResolution(10);
 
   //teste
@@ -212,15 +213,13 @@ void setup() {
   pump_onoff = 0;
   heater_onoff = 0;
 
-  //vari�veis para receber comandos
-  stringComplete = false;
-  inputString ="";
-
   //inicializa��o da serial
   Serial.begin(115200);
 
-  //inicializa��o do Json
-  CreateStructure();
+  //inicialização da estrutura i2c
+  Wire.begin(12); //arduino iniciado no endereço 4
+  Wire.onReceive(receiveEvent); //callback para recebimento de comandos
+  Wire.onRequest(requestEvent); //callback para responder à requisições
 
   //inicializaçãop das estruturas de protótipo
   pinMode(LDR_PIN,INPUT);
@@ -257,22 +256,6 @@ void loop() {
     runReads();
   }
   
-  //teste envio pacote Json
-  //Serial.print(stringComplete);
-  if (stringComplete){
-    ReceiveCommand(inputString);
-    //clear
-    inputString="";
-    stringComplete=false;
-    digitalWrite(RXLED,LOW);
-  }
- 
-  CurrentMillis = millis();
-  if (CurrentMillis - PreviousMillis > interval){
-    SendData();
-    PreviousMillis = CurrentMillis;
-  }
-
 }
 
 void emergencia(){
@@ -309,12 +292,22 @@ void set_rnd_values(){
   temp[2] = 15;
   temp[3] = 20;
 
+  //inicialização aleatória da estrutura i2c para envio
+  send_info.data.temp1 = temp[0];
+  send_info.data.temp2 = temp[1];
+  send_info.data.temp3 = temp[2];
+  send_info.data.temp4 = temp[3];
+  send_info.data.hotflow = vazao_fria;
+  send_info.data.coldflow = vazao_quente;
+  send_info.data.pump_speed = 62;
+  bitWrite(send_info.data.bstatus,0,1);
+  bitWrite(send_info.data.bstatus,1,1);
+  send_info.data.chksum = 27;
+
 }
 
-//fun��o que controla a mudan�a de menu quando o bot�o � solto
+//função que controla a mudan�a de menu quando o bot�o � solto
 void changeMenu(){
-
-
   if (!digitalRead(but1)) flag_button1 = 0x01;
   if (digitalRead(but1) && flag_button1){  //apenas quando o bot�o � solto ocorre a execu��o
     flag_button1 = 0x00;
@@ -325,7 +318,7 @@ void changeMenu(){
   }
 }
 
-//fun��o para chamar os menus
+//função para chamar os menus
 void dispMenu(){
   switch (menu){
   case 0x01:
@@ -519,92 +512,8 @@ void VazaoAguaQuente(){
 void runReads(){
   //Temperaturas();
   Temperaturas2();
-  VazaoAguaFria();
-  VazaoAguaQuente();
-}
-
-void CreateStructure(){
-
-  //dados de temperatura
-  JsonArray &sensortemps = root.createNestedArray("temps");
-  for (int i = 0; i < 4; i++){
-    sensortemps.add(temp[i]);
-  }
-
-  //dados de vazao
-  JsonArray &vazaovalues = root.createNestedArray("flows");
-  vazaovalues.add(vazao_quente);
-  vazaovalues.add(vazao_fria);
-
-  //dados de status
-  JsonArray &statusvalues = root.createNestedArray("status");
-  statusvalues.add(pump_onoff);
-  statusvalues.add(pot_value_mapped);
-  statusvalues.add(heater_onoff);
-
-  //dados de controle
-  JsonArray &malha1 = root.createNestedArray("malha_vq");
-  //dados ficticios
-  malha1.add(2);  //kp
-  malha1.add(5);  //ti
-  malha1.add(102); //td
-
-  JsonArray &malha2 = root.createNestedArray("malha_vf");
-  //dados ficticios
-  malha2.add(3);  //kp
-  malha2.add(11);  //ti
-  malha2.add(52); //td
-
-}
-
-void SendData(){
-  //Atualiza��o dos dados de processo
-  for (int i = 0; i < 4; i++){
-    root["temps"][i] = temp[i];
-  }
-  root["flows"][0] = vazao_quente;
-  root["flows"][1] = vazao_fria;
-
-  root["status"][0] = pump_onoff;
-  root["stauts"][1] = pot_value_mapped;
-  root["status"][2] = heater_onoff;
-
-  //imprime
-  root.printTo(Serial);
-  Serial.println();
-}
-
-void ReceiveCommand(String inputString){
-  JsonObject & rootread = jsonRead.parseObject(inputString);
-  if (!rootread.success()){
-    Serial.println("parse failed");
-  }
-  else{
-    //rootread.printTo(Serial);
-    //Serial.println();
-    digitalWrite(RXLED,HIGH);
-    delay(20);
-  }
- jsonRead.clear();  //necessário para poder processar outro comando
- //Serial.println(inputString);
-}
-
-void serialEvent(){
-  //Serial.println("Entrou");
-  while (Serial.available()){
-    char inChar = (char)Serial.read();
-    //Serial.println(inChar);
-    //inputString += inChar;
-    if (inChar == '\n'){
-      stringComplete = true;
-      //Serial.println(stringComplete);
-      //Serial.println(inputString);
-    }
-   //dessa forma elimina o enter da string Json
-   else{
-      inputString += inChar;
-   }
-  }
+  //VazaoAguaFria();
+  //VazaoAguaQuente();
 }
 
 void CalcParams(){
@@ -619,5 +528,30 @@ void Temperaturas2(){
   CalcParams();
   temp[0] = LM35_value;
   temp[1] = LDR_value;
+
+  send_info.data.temp1 = temp[0];
+  send_info.data.temp2 = temp[1];
+  send_info.data.pump_speed = pot_value_mapped;
+  //bitWrite(send_info.data.bstatus,0,pump_onoff);
+  //bitWrite(send_info.data.bstatus,1,heater_onoff);
+
 }
 
+//funções callback do i2c
+void receiveEvent(int Nbytes){
+  command = Wire.read();
+  if(command==1){
+    int i=0;
+    while(Wire.available()){
+      data[i] = Wire.read();
+      i = i + 1;
+    }
+    //aqui enviar os dados para serem tratados
+  }
+}
+
+void requestEvent(){
+  if(command==2){
+    Wire.write(send_info.I2C_packet,sizeof(processData));
+  }
+}

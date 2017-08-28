@@ -1,3 +1,5 @@
+#include <Wire.h>
+
 /*
 Name:    Parse Json Data
 Created:  10/07/2017 22:30
@@ -88,6 +90,12 @@ I2C_Send send_info;
 int command; //processar o indice de comando enviado pelo Rpi
 byte data[12];  //processar as informações de comando
 
+//estrutura para receber um float para alterar velocidade
+typedef union PumpDataSpeed {
+  float fspeed;
+  byte bspeed[4];
+};
+
 //vari�veis utilizadas no calculo de vazao de agua fria/quente
 unsigned long currentTime;
 unsigned long cloopTime;
@@ -160,6 +168,9 @@ void runReads();
 //funções para teste em protótipo
 void CalcParams();
 void Temperaturas2();
+
+//função para receber o valor em bytes via i2c e retornar a velocidade em float
+void parseSpeed(byte data[]);
 
 // inicializações e declarações de variáveis
 void setup() {
@@ -540,13 +551,35 @@ void Temperaturas2(){
 //funções callback do i2c
 void receiveEvent(int Nbytes){
   command = Wire.read();
-  if(command==1){
-    int i=0;
-    while(Wire.available()){
-      data[i] = Wire.read();
-      i = i + 1;
-    }
-    //aqui enviar os dados para serem tratados
+  switch(command) {
+    case 1: //comando de teste
+      //comando liga bomba
+      digitalWrite(inversor_rele, LOW); //o estado da bomba � invertido
+      pump_onoff = 1;
+
+    case 2:
+      //comando desliga bomba
+      digitalWrite(inversor_rele,HIGH);
+      pump_onoff = 0;
+
+    case 3:
+      //comando liga aquecedor
+      digitalWrite(heater_rele,HIGH);
+      heater_onoff = 1;
+
+    case 4:
+      //comando desliga aquecedor
+      digitalWrite(heater_rele,LOW);
+      heater_onoff = 0;
+
+    case 5:
+      //comando alterar velocidade da bomba
+      int i=0;
+      while(Wire.available()){
+        data[i] = Wire.read();
+        i = i + 1;
+      }
+      parseSpeed(data);
   }
 }
 
@@ -554,4 +587,14 @@ void requestEvent(){
   if(command==2){
     Wire.write(send_info.I2C_packet,sizeof(processData));
   }
+}
+
+void parseSpeed(byte data[]){
+  PumpDataSpeed speed;
+  speed.bspeed[0] = data[0];
+  speed.bspeed[1] = data[1];
+  speed.bspeed[2] = data[2];
+  speed.bspeed[3] = data[3];
+  Serial.println(speed.fspeed);
+  //PumpSpeed(speed.fspeed);
 }

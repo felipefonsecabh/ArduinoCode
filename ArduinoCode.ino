@@ -543,36 +543,41 @@ void Temperaturas2(){
   send_info.data.temp1 = temp[0];
   send_info.data.temp2 = temp[1];
   send_info.data.pump_speed = pot_value_mapped;
-  //bitWrite(send_info.data.bstatus,0,pump_onoff);
-  //bitWrite(send_info.data.bstatus,1,heater_onoff);
+  bitWrite(send_info.data.bstatus,0,pump_onoff);
+  bitWrite(send_info.data.bstatus,1,heater_onoff);
 
 }
 
 //funções callback do i2c
 void receiveEvent(int Nbytes){
   command = Wire.read();
+  
   switch(command) {
-    case 1: //comando de teste
+    case 49: //comando de teste
       //comando liga bomba
-      digitalWrite(inversor_rele, LOW); //o estado da bomba � invertido
+      digitalWrite(inversor_rele, LOW); //o estado da bomba é invertido
       pump_onoff = 1;
+      break;
 
-    case 2:
+    case 50:
       //comando desliga bomba
       digitalWrite(inversor_rele,HIGH);
       pump_onoff = 0;
+      break;
 
-    case 3:
+    case 51:
       //comando liga aquecedor
       digitalWrite(heater_rele,HIGH);
       heater_onoff = 1;
+      break;
 
-    case 4:
+    case 52:
       //comando desliga aquecedor
       digitalWrite(heater_rele,LOW);
       heater_onoff = 0;
+      break;
 
-    case 5:
+    case 53:
       //comando alterar velocidade da bomba
       int i=0;
       while(Wire.available()){
@@ -584,7 +589,7 @@ void receiveEvent(int Nbytes){
 }
 
 void requestEvent(){
-  if(command==2){
+  if(command==6){
     Wire.write(send_info.I2C_packet,sizeof(processData));
   }
 }

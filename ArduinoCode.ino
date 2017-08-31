@@ -53,14 +53,16 @@ Description: Primeira vers�o do c�digo para testar o funcionamento dos equip
 #define LM35_PIN A4
 #define RXLED 3
 
-//vari�veis internas
 #define TEMPERATURE_PRECISION 0
 
+//vari�veis internas
+
 //armazenar valores de entrada
-int switch_state;
+bool switch_state;
 int pot_value;
 int pump_onoff;
 int heater_onoff;
+
 
 float temp[4];
 double vazao_quente;
@@ -88,7 +90,6 @@ typedef union I2C_Send{ //compartilha a mesma área de memória
 
 I2C_Send send_info;
 int command; //processar o indice de comando enviado pelo Rpi
-byte data[12];  //processar as informações de comando
 
 //estrutura para receber um float para alterar velocidade
 typedef union PumpDataSpeed {
@@ -179,7 +180,7 @@ void setup() {
   pinMode(but1, INPUT_PULLUP);
   pinMode(but2, INPUT_PULLUP);
   pinMode(pot, INPUT);
-  pinMode(mode_switch, INPUT);
+  pinMode(mode_switch, INPUT); //0 - modo local, 1 - modo remoto
   pinMode(emergency_button, INPUT_PULLUP);
   pinMode(led_flow_mode, OUTPUT);
   pinMode(led_temp_mode, OUTPUT);
@@ -313,6 +314,7 @@ void set_rnd_values(){
   send_info.data.pump_speed = 62;
   bitWrite(send_info.data.bstatus,0,1);
   bitWrite(send_info.data.bstatus,1,1);
+  bitWrite(send_info.data.bstatus,2,1);
   send_info.data.chksum = 27;
 
 }
@@ -533,6 +535,7 @@ void CalcParams(){
   LM35_read = analogRead(LM35_PIN);
   LM35_value = LM35_read * 0.48875855;
   LDR_value = LDR_read / 10;
+  switch_state = digitalRead(mode_switch);
 }
 
 void Temperaturas2(){
@@ -545,6 +548,7 @@ void Temperaturas2(){
   send_info.data.pump_speed = pot_value_mapped;
   bitWrite(send_info.data.bstatus,0,pump_onoff);
   bitWrite(send_info.data.bstatus,1,heater_onoff);
+  bitWrite(send_Info.data.bstatus,1,switch_state);
 
 }
 

@@ -608,11 +608,12 @@ void requestEvent(){
 }
 
 void parseSpeed(byte data[]){
+  //o primeiro byte é o número de bytes do envio; deve-se ignorar
   PumpDataSpeed speed;
-  speed.bspeed[0] = data[0];
-  speed.bspeed[1] = data[1];
-  speed.bspeed[2] = data[2];
-  speed.bspeed[3] = data[3];
+  speed.bspeed[0] = data[1];
+  speed.bspeed[1] = data[2];
+  speed.bspeed[2] = data[3];
+  speed.bspeed[3] = data[4];
   Serial.println(speed.fspeed);
   //PumpSpeed(speed.fspeed);
 }

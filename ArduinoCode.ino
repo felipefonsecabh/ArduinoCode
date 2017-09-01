@@ -62,13 +62,14 @@ bool switch_state;
 int pot_value;
 int pump_onoff;
 int heater_onoff;
+bool emergency_status;
 
 
 float temp[4];
 double vazao_quente;
 float vazao_fria;
 volatile int flow_frequency;
-int emergency_status;
+
 
 //estrutura de dados para envio i2c
 typedef struct processData{
@@ -87,6 +88,8 @@ typedef union I2C_Send{ //compartilha a mesma área de memória
   processData data;
   byte I2C_packet[sizeof(processData)];
 };
+
+byte data[4];
 
 I2C_Send send_info;
 int command; //processar o indice de comando enviado pelo Rpi
@@ -248,7 +251,9 @@ void setup() {
 void loop() {
 
   if (digitalRead(emergency_button) == LOW){
+    emergency_status = true;
     emergencia();
+    runReads();
   }
   else if (!digitalRead(emergency_button) == LOW && flag_emergency){
     flag_emergency = 0x00;
@@ -259,6 +264,7 @@ void loop() {
     /*aqui terá que ser feita uma lógica para testar qual o estado da chave para selecionar qual é o modo de operação
      * do arduino. por enquanto, deixando nos dois modos.
      */
+     emergency_status = false;
 
     //funções de modo local (display lcd). 
     changeMenu();
@@ -315,6 +321,7 @@ void set_rnd_values(){
   bitWrite(send_info.data.bstatus,0,1);
   bitWrite(send_info.data.bstatus,1,1);
   bitWrite(send_info.data.bstatus,2,1);
+  bitWrite(send_info.data.bstatus,3,0);
   send_info.data.chksum = 27;
 
 }
@@ -548,7 +555,8 @@ void Temperaturas2(){
   send_info.data.pump_speed = pot_value_mapped;
   bitWrite(send_info.data.bstatus,0,pump_onoff);
   bitWrite(send_info.data.bstatus,1,heater_onoff);
-  bitWrite(send_Info.data.bstatus,1,switch_state);
+  bitWrite(send_info.data.bstatus,2,switch_state);
+  bitWrite(send_info.data.bstatus,3,emergency_status);
 
 }
 
@@ -589,6 +597,7 @@ void receiveEvent(int Nbytes){
         i = i + 1;
       }
       parseSpeed(data);
+      break;
   }
 }
 

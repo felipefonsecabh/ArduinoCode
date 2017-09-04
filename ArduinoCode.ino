@@ -141,6 +141,7 @@ Ultrasonic ultrasonic(ultrassonico_trigger, ultrassonico_echo);
 LiquidCrystal lcd(41, 11, 12, 40, 13, 38);  //no original deve-se utilizar  LiquidCrystal lcd(41, 11, 12, 40, 13, 38);
 
 //funções
+void ReadPotentiometer();
 
 //funções de navegação  - Display LCD
 void changeMenu();
@@ -529,11 +530,27 @@ void VazaoAguaQuente(){
   }
 }
 
+void ReadPotentiometer(){
+  pot_value = analogRead(pot);
+  pot_value_mapped = map(pot_value, 0, 1023, 0, 100);
+}
+
 void runReads(){
   //Temperaturas();
   Temperaturas2();
   //VazaoAguaFria();
   //VazaoAguaQuente();
+  ReadPotentiometer();
+  send_info.data.temp1 = temp[0];
+  send_info.data.temp2 = temp[1];
+  send_info.data.temp3 = temp[2];
+  send_info.data.temp4 = temp[3];
+  send_info.data.pump_speed = pot_value_mapped;
+  send_info.data.hotflow = vazao_quente;
+  send_info.data.coldflow = vazao_fria;
+  bitWrite(send_info.data.bstatus,0,pump_onoff);
+  bitWrite(send_info.data.bstatus,1,heater_onoff);
+  bitWrite(send_info.data.bstatus,2,emergency_status);
 }
 
 void CalcParams(){
@@ -544,6 +561,8 @@ void CalcParams(){
   LDR_value = LDR_read / 10;
   switch_state = digitalRead(mode_switch);
 }
+
+
 
 void Temperaturas2(){
   CalcParams();

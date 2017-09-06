@@ -1,4 +1,3 @@
-#include <Wire.h>
 
 /*
 Name:    Parse Json Data
@@ -63,6 +62,7 @@ int pot_value;
 int pump_onoff;
 int heater_onoff;
 bool emergency_status;
+float remote_pumpspeed;
 
 
 float temp[4];
@@ -79,7 +79,7 @@ typedef struct processData{
   float temp4;
   float hotflow;
   float coldflow;
-  byte pump_speed;
+  float pump_speed;
   byte bstatus;
   byte chksum;
 };
@@ -142,6 +142,7 @@ LiquidCrystal lcd(41, 11, 12, 40, 13, 38);  //no original deve-se utilizar  Liqu
 
 //funções
 void ReadPotentiometer();
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
 
 //funções de navegação  - Display LCD
 void changeMenu();
@@ -267,12 +268,20 @@ void loop() {
      */
      emergency_status = false;
 
-    //funções de modo local (display lcd). 
-    changeMenu();
-    dispMenu();
+     //le a entrada da chave
+     switch_state = digitalRead(mode_switch);
 
-    //funções de modo remoto
-    runReads();
+     if(switch_state){
+        //funções de modo remoto
+        runReads();
+     }
+     else{
+       //funçõses de modo local
+       changeMenu();
+       dispMenu();
+       runReads();
+     }
+    
   }
   
 }
@@ -437,8 +446,7 @@ void PumpCommand(){
   }
   //caso a bomba esteja ligada permitir alterar a velocidade da bomba
   if (pumpstatus == 0x01){
-    pot_value = analogRead(pot);
-    pot_value_mapped = map(pot_value, 0, 1023, 0, 100);
+    ReadPotentiometer();
     PumpSpeed(pot_value_mapped);
     lcd.setCursor(0, 1);
     lcd.print("rot:");
@@ -532,25 +540,34 @@ void VazaoAguaQuente(){
 
 void ReadPotentiometer(){
   pot_value = analogRead(pot);
-  pot_value_mapped = map(pot_value, 0, 1023, 0, 100);
+  pot_value_mapped = mapfloat(pot_value, 0, 1023, 0, 100);
 }
 
 void runReads(){
-  //Temperaturas();
-  Temperaturas2();
-  //VazaoAguaFria();
-  //VazaoAguaQuente();
+  Temperaturas();
+  //Temperaturas2();
+  VazaoAguaFria();
+  VazaoAguaQuente();
   ReadPotentiometer();
   send_info.data.temp1 = temp[0];
   send_info.data.temp2 = temp[1];
   send_info.data.temp3 = temp[2];
   send_info.data.temp4 = temp[3];
-  send_info.data.pump_speed = pot_value_mapped;
+
+  //relacionado a velocidade
+  if(switch_state){
+    send_info.data.pump_speed = remote_pumpspeed;
+  }
+  else{
+    send_info.data.pump_speed = pot_value_mapped;
+  }
+  
   send_info.data.hotflow = vazao_quente;
   send_info.data.coldflow = vazao_fria;
   bitWrite(send_info.data.bstatus,0,pump_onoff);
   bitWrite(send_info.data.bstatus,1,heater_onoff);
-  bitWrite(send_info.data.bstatus,2,emergency_status);
+  bitWrite(send_info.data.bstatus,2,switch_state);
+  bitWrite(send_info.data.bstatus,3,emergency_status);
 }
 
 void CalcParams(){
@@ -568,15 +585,6 @@ void Temperaturas2(){
   CalcParams();
   temp[0] = LM35_value;
   temp[1] = LDR_value;
-
-  send_info.data.temp1 = temp[0];
-  send_info.data.temp2 = temp[1];
-  send_info.data.pump_speed = pot_value_mapped;
-  bitWrite(send_info.data.bstatus,0,pump_onoff);
-  bitWrite(send_info.data.bstatus,1,heater_onoff);
-  bitWrite(send_info.data.bstatus,2,switch_state);
-  bitWrite(send_info.data.bstatus,3,emergency_status);
-
 }
 
 //funções callback do i2c
@@ -633,6 +641,11 @@ void parseSpeed(byte data[]){
   speed.bspeed[1] = data[2];
   speed.bspeed[2] = data[3];
   speed.bspeed[3] = data[4];
-  Serial.println(speed.fspeed);
-  //PumpSpeed(speed.fspeed);
+  //Serial.println(speed.fspeed);
+  remote_pumpspeed = speed.fspeed;
+  PumpSpeed(remote_pumpspeed);
+}
+
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max){
+ return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }

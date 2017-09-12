@@ -48,6 +48,14 @@
 
 #define MAX_MENU_ITENS 2         //numero de telas no menu
 
+//testes em prototipo
+#define LDR_PIN A3
+#define LM35_PIN A4
+#define RXLED 3
+
+float LM35_value;
+float LDR_value;
+
 //vari�veis internas
 
 //armazenar valores de entrada
@@ -104,17 +112,14 @@ float cmMsec;
 float nivel;
 //float vazao1_sf;   //se for necessário para a função de vazao quente, descomentar
 
-//variáveis auxiliares para navegação
-char menu = 0x01;
+//variáveis auxiliares para operação local
 char flag_button1 = 0x00;
 char flag_button2 = 0x00;
 char flag_emergency = 0x00;
 String mode = "";
 
 //variáveis auxiliares para comando
-char pumpstatus;
 float pot_value_mapped;
-char heaterstatus;
 
 //inicialização de objetos
 OneWire oneWire(ONE_WIRE_BUS);
@@ -158,6 +163,9 @@ void refresh_I2C_Packet();
 //função para receber o valor em bytes via i2c e retornar a velocidade em float
 void parseSpeed(byte data[]);
 
+//testes em prototipo
+void Temperaturas2();
+
 // the setup function runs once when you press reset or power the board
 void setup() {
 	//painel
@@ -166,8 +174,8 @@ void setup() {
 	pinMode(pot, INPUT);
 	pinMode(mode_switch, INPUT);
 	pinMode(emergency_button, INPUT);
-	pinMode(led_flow_mode, OUTPUT);
-	pinMode(led_pump, OUTPUT);
+	pinMode(led1, OUTPUT);
+  pinMode(led2, OUTPUT);
 	pinMode(led_heater, OUTPUT);
 
 	//sensores
@@ -195,13 +203,10 @@ void setup() {
   //iniciar lcd
   lcd.begin(20,4);  //no original utilizar 20,4
 
-	//resolução de escrita
+	//resolução de escrita do DAC
 	analogWriteResolution(10);
 
-	//teste
-  //set_rnd_values();
-  pumpstatus = 0x00;
-  heaterstatus = 0x00;
+  //variáveis que guarda o status da bomba e do aquecedor
 	pump_onoff = 0;
   heater_onoff = 0;
     
@@ -209,6 +214,7 @@ void setup() {
   Serial.begin(115200);
 
   //inicialização da estrutura i2c
+  send_info.data.chksum = 27;
   Wire.begin(12); //arduino iniciado no endereço 12
   Wire.onReceive(receiveEvent); //callback para recebimento de comandos
   Wire.onRequest(requestEvent); //callback para responder à requisições
@@ -307,7 +313,6 @@ void RemoteState(){
 void emergencia(){
 	//digitalWrite(led_flow_mode, LOW);//Apaga LED 1
 	digitalWrite(led_heater, LOW);//Apaga LED 2
-	//digitalWrite(led_pump, LOW);//Apaga LED 4
 	digitalWrite(inversor_rele, HIGH);//Desliga a bomba
 	digitalWrite(heater_rele, LOW);//Desliga o aquecedor
 
@@ -337,7 +342,7 @@ void EmergencyStatus(){
 
 void Menu(int op){
 
-  mode = (op==1) ? "Remote Mode" : "Local Mode";
+  mode = (op==1) ? "Remote Mode" : "Local  Mode";
 
   lcd.setCursor(0,0);
   lcd.print(mode);
@@ -406,6 +411,13 @@ void VazaoAguaQuente(){
   }
 }
 
+void Temperaturas2(){
+  LM35_value = analogRead(LM35_PIN) *0.48875855;
+  LDR_value = analogRead(LDR_PIN) / 10.0;
+  temp[0] = LM35_value;
+  temp[1]= LDR_value;
+}
+
 void PumpSpeed(float ref){
 	if (ref>100)
 		ref = 100;
@@ -420,9 +432,12 @@ void ReadPotentiometer(){
 }
 
 void runReads(){
+  /*
   Temperaturas();
   VazaoAguaFria();
   VazaoAguaQuente();
+  */
+  Temperaturas2();
 }
 
 

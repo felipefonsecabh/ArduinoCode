@@ -1,3 +1,6 @@
+#include <Arduino.h>
+#line 1 "e:\\ArduinoCode\\ArduinoCode.ino"
+#line 1 "e:\\ArduinoCode\\ArduinoCode.ino"
 /*
  Name:		SimpleClass_Applcation.ino
  Created:	5/26/2017 4:18:28 PM
@@ -20,8 +23,8 @@
 //#include <Utility.h>
 //#include <TimedAction.h>
 
-//lib Modbus
-#include <Modbusino.h>
+//lib i2c
+#include <Wire.h>
 
 //Pinos de entrada e sa�da
 
@@ -39,22 +42,14 @@
 #define TEMPERATURE_PRECISION 10
 
 
-#define led1 44                  // utilizado para sinalização geral
-#define led2 45                  // utilizado para sinalização geral
+#define led_flow_mode 45         // no original trocar para 45
+#define led_pump 44           // no programa de testes 35; no original trocar para 44
 #define led_heater 47            // no programa de testes 37; no original trocar para 47
 
 #define inversor_rele 49        //no programa de teste 47;no original trocar para 49
 #define heater_rele 10          //no programa de testes 49;no original trocar para 10
 
 #define MAX_MENU_ITENS 2         //numero de telas no menu
-
-//testes em prototipo
-#define LDR_PIN A3
-#define LM35_PIN A4
-#define RXLED 3
-
-float LM35_value;
-float LDR_value;
 
 //vari�veis internas
 
@@ -72,7 +67,8 @@ double vazao_quente;
 float vazao_fria;
 volatile int flow_frequency;
 
-//estrutura de dados para troca de informações em modbus
+
+//estrutura de dados para envio i2c
 typedef struct processData{
   float temp1;
   float temp2;
@@ -81,30 +77,27 @@ typedef struct processData{
   float hotflow;
   float coldflow;
   float pump_speed;
-  word bstatus;
-  word command;
-  float speedcommand;
-  word chksum;
-  
+  byte bstatus;
+  byte chksum;
 };
 
+typedef union I2C_Send{ //compartilha a mesma área de memória
+  processData data;
+  byte I2C_packet[sizeof(processData)];
+};
+
+
+I2C_Send send_info;
 int command; //processar o indice de comando enviado pelo Rpi
 
-//inicialização do slave modbus
-ModbusinoSlave modbusino_slave(1);
+//array de bytes auxilar para receber a velocidade da bomba
+byte data[4];
 
-//Alocação de registros para trocar dados; 19 registros são necessários incluindo os comandos
-
-typedef union modbus_read{
-  processData data;
-  uint16_t tab_reg[19];
+//estrutura para receber um float para alterar velocidade
+typedef union PumpDataSpeed {
+  float fspeed;
+  byte bspeed[4];
 };
-
-modbus_read modbusinfo;
-
-//funções para detectar alteração de comandos
-int lastcommand;
-float lastspeed;
 
 //variáveis utilizadas no calculo de vazao de agua fria/quente
 unsigned long currentTime;
@@ -114,14 +107,17 @@ float cmMsec;
 float nivel;
 //float vazao1_sf;   //se for necessário para a função de vazao quente, descomentar
 
-//variáveis auxiliares para operação local
+//variáveis auxiliares para navegação
+char menu = 0x01;
 char flag_button1 = 0x00;
 char flag_button2 = 0x00;
 char flag_emergency = 0x00;
 String mode = "";
 
 //variáveis auxiliares para comando
+char pumpstatus;
 float pot_value_mapped;
+char heaterstatus;
 
 //inicialização de objetos
 OneWire oneWire(ONE_WIRE_BUS);
@@ -160,16 +156,21 @@ void emergencia();
 
 //funções para fazerem a leitura periodica dos valores analógicos
 void runReads();
-void refresh_modbus_packet();
+void refresh_I2C_Packet();
 
-//função para interpretação de comandos
-void detectChanges();
-void runCommands(int command);
-
-//testes em prototipo
-void Temperaturas2();
+//função para receber o valor em bytes via i2c e retornar a velocidade em float
+void parseSpeed(byte data[]);
 
 // the setup function runs once when you press reset or power the board
+#line 162 "e:\\ArduinoCode\\ArduinoCode.ino"
+void setup();
+#line 219 "e:\\ArduinoCode\\ArduinoCode.ino"
+void loop();
+#line 430 "e:\\ArduinoCode\\ArduinoCode.ino"
+void receiveEvent(int Nbytes);
+#line 472 "e:\\ArduinoCode\\ArduinoCode.ino"
+void requestEvent();
+#line 162 "e:\\ArduinoCode\\ArduinoCode.ino"
 void setup() {
 	//painel
 	pinMode(but1, INPUT_PULLUP);
@@ -177,8 +178,8 @@ void setup() {
 	pinMode(pot, INPUT);
 	pinMode(mode_switch, INPUT);
 	pinMode(emergency_button, INPUT);
-	pinMode(led1, OUTPUT);
-  pinMode(led2, OUTPUT);
+	pinMode(led_flow_mode, OUTPUT);
+	pinMode(led_pump, OUTPUT);
 	pinMode(led_heater, OUTPUT);
 
 	//sensores
@@ -206,21 +207,23 @@ void setup() {
   //iniciar lcd
   lcd.begin(20,4);  //no original utilizar 20,4
 
-	//resolução de escrita do DAC
+	//resolução de escrita
 	analogWriteResolution(10);
 
-  //variáveis que guarda o status da bomba e do aquecedor
+	//teste
+  //set_rnd_values();
+  pumpstatus = 0x00;
+  heaterstatus = 0x00;
 	pump_onoff = 0;
   heater_onoff = 0;
     
   //inicialização da serial
   Serial.begin(115200);
 
-  //inicialização da estrutura modbus
-  lastspeed = 0;
-  lastcommand = 0;
-  modbusino_slave.setup(115200);
-  modbusinfo.data.chksum = 27;
+  //inicialização da estrutura i2c
+  Wire.begin(12); //arduino iniciado no endereço 12
+  Wire.onReceive(receiveEvent); //callback para recebimento de comandos
+  Wire.onRequest(requestEvent); //callback para responder à requisições
 }
 
 
@@ -298,8 +301,8 @@ void LocalState(){
   //ocorrer a mudança para o modo remoto, por exemplo, as informações sejam corretas
   remote_pumpspeed = pot_value_mapped;
 
-  //atualiza as informações
-  refresh_modbus_packet();
+  //atualiza a estrutura de envio de dados via i2c
+  refresh_I2C_Packet();
 }
 
 void RemoteState(){
@@ -310,15 +313,13 @@ void RemoteState(){
   Menu(1);
 
   //atualiza a estrutura de envio de dados via i2c
-  refresh_modbus_packet();
-
-  //detecta modificações nas variáveis
-  detectChanges();
+  refresh_I2C_Packet();    
 }
 
 void emergencia(){
 	//digitalWrite(led_flow_mode, LOW);//Apaga LED 1
 	digitalWrite(led_heater, LOW);//Apaga LED 2
+	//digitalWrite(led_pump, LOW);//Apaga LED 4
 	digitalWrite(inversor_rele, HIGH);//Desliga a bomba
 	digitalWrite(heater_rele, LOW);//Desliga o aquecedor
 
@@ -348,7 +349,7 @@ void EmergencyStatus(){
 
 void Menu(int op){
 
-  mode = (op==1) ? "Remote Mode" : "Local  Mode";
+  mode = (op==1) ? "Remote Mode" : "Local Mode";
 
   lcd.setCursor(0,0);
   lcd.print(mode);
@@ -417,13 +418,6 @@ void VazaoAguaQuente(){
   }
 }
 
-void Temperaturas2(){
-  LM35_value = analogRead(LM35_PIN) *0.48875855;
-  LDR_value = analogRead(LDR_PIN) / 10.0;
-  temp[0] = LM35_value;
-  temp[1]= LDR_value;
-}
-
 void PumpSpeed(float ref){
 	if (ref>100)
 		ref = 100;
@@ -438,22 +432,15 @@ void ReadPotentiometer(){
 }
 
 void runReads(){
-  /*
   Temperaturas();
   VazaoAguaFria();
   VazaoAguaQuente();
-  */
-  Temperaturas2();
 }
 
-void detectChanges(){
-  if(lastcommand != modbusinfo.data.command){
-    runCommands(modbusinfo.data.command);
-  }
-}
 
 //funções callback do i2c
-void runCommands(int command){
+void receiveEvent(int Nbytes){
+    command = Wire.read();
     
     switch(command) {
       case 49: //comando de teste
@@ -484,40 +471,63 @@ void runCommands(int command){
   
       case 53:
         //comando alterar velocidade da bomba
+        int i=0;
+        while(Wire.available()){
+          data[i] = Wire.read();
+          i = i + 1;
+        }
+        parseSpeed(data);
         break;
-        PumpSpeed(lastspeed);
     }
 }
+  
+void requestEvent(){
+  if(command==6){
+    Wire.write(send_info.I2C_packet,sizeof(processData));
+  }
+}
+  
+void parseSpeed(byte data[]){
+  //o primeiro byte é o número de bytes do envio; deve-se ignorar
+  PumpDataSpeed speed;
+  speed.bspeed[0] = data[1];
+  speed.bspeed[1] = data[2];
+  speed.bspeed[2] = data[3];
+  speed.bspeed[3] = data[4];
+  //Serial.println(speed.fspeed);
+  remote_pumpspeed = speed.fspeed;
+  PumpSpeed(remote_pumpspeed); //envia o comando de velocidade para a bomba fisicamente
+}
 
-
-void refresh_modbus_packet(){
-  modbusinfo.data.temp1 = temp[0];
-  modbusinfo.data.temp2 = temp[1];
-  modbusinfo.data.temp3 = temp[2];
-  modbusinfo.data.temp4 = temp[3];
+void refresh_I2C_Packet(){
+  send_info.data.temp1 = temp[0];
+  send_info.data.temp2 = temp[1];
+  send_info.data.temp3 = temp[2];
+  send_info.data.temp4 = temp[3];
   
   //se a bomba estiver desligada, ignorar o valor do potenciometro
   if(pump_onoff){
     if(switch_state){
-      modbusinfo.data.pump_speed = remote_pumpspeed;
+      send_info.data.pump_speed = remote_pumpspeed;
     }
     else{
-      modbusinfo.data.pump_speed = pot_value_mapped;
+      send_info.data.pump_speed = pot_value_mapped;
     }
   }
   else{
-    modbusinfo.data.pump_speed = 0.0;
+    send_info.data.pump_speed = 0.0;
   }
     
     
-  modbusinfo.data.hotflow = vazao_quente;
-  modbusinfo.data.coldflow = vazao_fria;
-  bitWrite(modbusinfo.data.bstatus,0,pump_onoff);
-  bitWrite(modbusinfo.data.bstatus,1,heater_onoff);
-  bitWrite(modbusinfo.data.bstatus,2,switch_state);
-  bitWrite(modbusinfo.data.bstatus,3,emergency_status);
+  send_info.data.hotflow = vazao_quente;
+  send_info.data.coldflow = vazao_fria;
+  bitWrite(send_info.data.bstatus,0,pump_onoff);
+  bitWrite(send_info.data.bstatus,1,heater_onoff);
+  bitWrite(send_info.data.bstatus,2,switch_state);
+  bitWrite(send_info.data.bstatus,3,emergency_status);
 }
   
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max){
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
+

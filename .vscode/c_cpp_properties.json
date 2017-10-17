@@ -1,0 +1,25 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "C:\\Users\\fonseca.ELIPSE\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\sam\\1.6.11\\cores\\arduino",
+                "C:\\Program Files (x86)\\Arduino\\libraries",
+                "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries",
+                "C:\\Program Files (x86)\\Arduino"
+
+            ],
+            "browse": {
+                "limitSymbolsToIncludedHeaders": true,
+                "path": [
+                    "C:\\Users\\fonseca.ELIPSE\\AppData\\Local\\Arduino15\\packages\\arduino\\hardware\\sam\\1.6.11\\libraries",
+                    "${workspaceRoot}",
+                    "C:\\Program Files (x86)\\Arduino\\libraries",
+                    "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries"
+                ]
+            },
+            "intelliSenseMode": "msvc-x64"
+        }
+    ],
+    "version": 2
+}

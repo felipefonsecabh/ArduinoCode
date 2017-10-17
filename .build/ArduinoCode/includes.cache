@@ -1,0 +1,72 @@
+[
+  {
+    "Sourcefile": "",
+    "Include": "",
+    "Includepath": "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\cores\\arduino"
+  },
+  {
+    "Sourcefile": "",
+    "Include": "",
+    "Includepath": "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\variants\\standard"
+  },
+  {
+    "Sourcefile": "e:\\ArduinoCode\\.build\\ArduinoCode\\sketch\\ArduinoCode.ino.cpp",
+    "Include": "OneWire.h",
+    "Includepath": "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries\\OneWire-master"
+  },
+  {
+    "Sourcefile": "e:\\ArduinoCode\\.build\\ArduinoCode\\sketch\\ArduinoCode.ino.cpp",
+    "Include": "DallasTemperature.h",
+    "Includepath": "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries\\Arduino-Temperature-Control-Library-master"
+  },
+  {
+    "Sourcefile": "e:\\ArduinoCode\\.build\\ArduinoCode\\sketch\\ArduinoCode.ino.cpp",
+    "Include": "Ultrasonic.h",
+    "Includepath": "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries\\Ultrasonic-master"
+  },
+  {
+    "Sourcefile": "e:\\ArduinoCode\\.build\\ArduinoCode\\sketch\\ArduinoCode.ino.cpp",
+    "Include": "LiquidCrystal.h",
+    "Includepath": "C:\\Program Files (x86)\\Arduino\\libraries\\LiquidCrystal\\src"
+  },
+  {
+    "Sourcefile": "e:\\ArduinoCode\\.build\\ArduinoCode\\sketch\\ArduinoCode.ino.cpp",
+    "Include": "Wire.h",
+    "Includepath": "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\libraries\\Wire\\src"
+  },
+  {
+    "Sourcefile": "e:\\ArduinoCode\\.build\\ArduinoCode\\sketch\\ArduinoCode.ino.cpp",
+    "Include": "",
+    "Includepath": ""
+  },
+  {
+    "Sourcefile": "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries\\OneWire-master\\OneWire.cpp",
+    "Include": "",
+    "Includepath": ""
+  },
+  {
+    "Sourcefile": "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries\\Arduino-Temperature-Control-Library-master\\DallasTemperature.cpp",
+    "Include": "",
+    "Includepath": ""
+  },
+  {
+    "Sourcefile": "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries\\Ultrasonic-master\\Ultrasonic.cpp",
+    "Include": "",
+    "Includepath": ""
+  },
+  {
+    "Sourcefile": "C:\\Program Files (x86)\\Arduino\\libraries\\LiquidCrystal\\src\\LiquidCrystal.cpp",
+    "Include": "",
+    "Includepath": ""
+  },
+  {
+    "Sourcefile": "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\libraries\\Wire\\src\\Wire.cpp",
+    "Include": "",
+    "Includepath": ""
+  },
+  {
+    "Sourcefile": "C:\\Program Files (x86)\\Arduino\\hardware\\arduino\\avr\\libraries\\Wire\\src\\utility\\twi.c",
+    "Include": "",
+    "Includepath": ""
+  }
+]

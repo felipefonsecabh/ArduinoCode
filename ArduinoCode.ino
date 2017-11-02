@@ -20,8 +20,8 @@
 //#include <Utility.h>
 //#include <TimedAction.h>
 
-//lib i2c
-#include <Wire.h>
+//lib jsoncmd
+#include <ArduinoJson.h>
 
 //gerar sinais
 #include <waveforms.h>
@@ -78,36 +78,15 @@ float vazao_fria;
 volatile int flow_frequency;
 
 
-//estrutura de dados para envio i2c
-typedef struct processData {
-  float temp1;
-  float temp2;
-  float temp3;
-  float temp4;
-  float hotflow;
-  float coldflow;
-  float pump_speed;
-  byte bstatus;
-  byte chksum;
-};
+//string para recever o comando json
+int command;
+String jsoncmd;
 
-typedef union I2C_Send { //compartilha a mesma área de memória
-  processData data;
-  byte I2C_packet[sizeof(processData)];
-};
-
-
-I2C_Send send_info;
-int command; //processar o indice de comando enviado pelo Rpi
-
-//array de bytes auxilar para receber a velocidade da bomba
-byte data[4];
-
-//estrutura para receber um float para alterar velocidade
-typedef union PumpDataSpeed {
-  float fspeed;
-  byte bspeed[4];
-};
+//inicialização de um buffer json
+StaticJsonBuffer<200> statebuffer;
+StaticJsonBuffer<50> cmdbuffer;
+JsonObject& statejson = statebuffer.createObject();
+int bstatus;
 
 //variáveis utilizadas no calculo de vazao de agua fria/quente
 unsigned long currentTime;
@@ -168,10 +147,10 @@ void emergencia();
 
 //funções para fazerem a leitura periodica dos valores analógicos
 void runReads();
-void refresh_I2C_Packet();
 
-//função para receber o valor em bytes via i2c e retornar a velocidade em float
-void parseSpeed(byte data[]);
+// atualiza o estado do sistema
+void refresh_Json_packet();
+void create_json_state();
 
 //testes em prototipo
 void Temperaturas2();
@@ -224,11 +203,11 @@ void setup() {
   //inicialização da serial
   Serial.begin(115200);
 
-  //inicialização da estrutura i2c
-  send_info.data.chksum = 27;
-  Wire.begin(12); //arduino iniciado no endereço 12
-  Wire.onReceive(receiveEvent); //callback para recebimento de comandos
-  Wire.onRequest(requestEvent); //callback para responder à requisições
+  //inicialização do pacote json para envio do status
+  create_json_state();
+
+  //inicialização do inteiro auxiliar para os status digitais
+  bstatus = 0;
 
   //semente para o simulador
   randomSeed(analogRead(LM35_PIN));
@@ -312,7 +291,7 @@ void LocalState() {
   remote_pumpspeed = pot_value_mapped;
 
   //atualiza a estrutura de envio de dados via i2c
-  refresh_I2C_Packet();
+  refresh_Json_packet();
 }
 
 void RemoteState() {
@@ -323,7 +302,7 @@ void RemoteState() {
   Menu(1);
 
   //atualiza a estrutura de envio de dados via i2c
-  refresh_I2C_Packet();
+  refresh_Json_packet ();
 }
 
 void emergencia() {
@@ -483,12 +462,13 @@ void runReads() {
   Simulator();
 }
 
-
 //funções callback do i2c
-void receiveEvent(int Nbytes) {
-  command = Wire.read();
-
+void serialEvent(){
+  command = Serial.read();
+  Serial.println(command);
+  
   switch (command) {
+  
     case 49: //comando de teste
       //comando liga bomba
       digitalWrite(inversor_rele, LOW); //o estado da bomba é invertido
@@ -517,60 +497,46 @@ void receiveEvent(int Nbytes) {
 
     case 53:
       //comando alterar velocidade da bomba
-      int i = 0;
-      while (Wire.available()) {
-        data[i] = Wire.read();
-        i = i + 1;
-      }
-      parseSpeed(data);
+      jsoncmd = Serial.readStringUntil('\n');
+      JsonObject& cmdjson = cmdbuffer.parseObject(jsoncmd);
+      remote_pumpspeed = cmdjson["pumpspeed"];
+      PumpSpeed(remote_pumpspeed);
+      Serial.println(remote_pumpspeed);
+      break;
+
+    case 54:  // requisição de dados
+      statejson.printTo(Serial);
       break;
   }
 }
 
-void requestEvent() {
-  if (command == 6) {
-    Wire.write(send_info.I2C_packet, sizeof(processData));
+void refresh_Json_packet(){
+  for(int i=0;i<4; ++i){
+    statejson["temps"][i] = temp[i];
   }
+  statejson["HotFlow"] = vazao_quente;
+  statejson["ColdFlow"] = vazao_fria;
+  
+  bitWrite(bstatus,0,pump_onoff);
+  bitWrite(bstatus,1,heater_onoff);
+  bitWrite(bstatus,2,switch_state);
+  bitWrite(bstatus,3,emergency_status);
+
+  statejson["bstatus"] = bstatus;
+
 }
 
-void parseSpeed(byte data[]) {
-  //o primeiro byte é o número de bytes do envio; deve-se ignorar
-  PumpDataSpeed speed;
-  speed.bspeed[0] = data[1];
-  speed.bspeed[1] = data[2];
-  speed.bspeed[2] = data[3];
-  speed.bspeed[3] = data[4];
-  //Serial.println(speed.fspeed);
-  remote_pumpspeed = speed.fspeed;
-  PumpSpeed(remote_pumpspeed); //envia o comando de velocidade para a bomba fisicamente
-}
-
-void refresh_I2C_Packet() {
-  send_info.data.temp1 = temp[0];
-  send_info.data.temp2 = temp[1];
-  send_info.data.temp3 = temp[2];
-  send_info.data.temp4 = temp[3];
-
-  //se a bomba estiver desligada, ignorar o valor do potenciometro
-  if (pump_onoff) {
-    if (switch_state) {
-      send_info.data.pump_speed = remote_pumpspeed;
-    }
-    else {
-      send_info.data.pump_speed = pot_value_mapped;
-    }
+void create_json_state(){
+  
+  JsonArray& arrtemps = statejson.createNestedArray("temps");
+  for(int i=0; i<4; ++i){
+    arrtemps.add(0.0);
   }
-  else {
-    send_info.data.pump_speed = 0.0;
-  }
+  statejson["HotFlow"] = 0.0;
+  statejson["ColdFlow"] = 0.0;
+  statejson["PumpSpeed"] = 0.0;
+  statejson["bstatus"] = 0;
 
-
-  send_info.data.hotflow = vazao_quente;
-  send_info.data.coldflow = vazao_fria;
-  bitWrite(send_info.data.bstatus, 0, pump_onoff);
-  bitWrite(send_info.data.bstatus, 1, heater_onoff);
-  bitWrite(send_info.data.bstatus, 2, switch_state);
-  bitWrite(send_info.data.bstatus, 3, emergency_status);
 }
 
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max) {

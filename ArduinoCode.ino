@@ -1,9 +1,9 @@
 /*
- Name:		SimpleClass_Applcation.ino
- Created:	5/26/2017 4:18:28 PM
- Author:	Felipe Fonseca
- Description: Versão de Código para o Trocador de Calor de forma a simplificar
- a operçãoo para tornar possível a utilização em aulas
+  Name:		SimpleClass_Applcation.ino
+  Created:	5/26/2017 4:18:28 PM
+  Author:	Felipe Fonseca
+  Description: Versão de Código para o Trocador de Calor de forma a simplificar
+  a operçãoo para tornar possível a utilização em aulas
 */
 
 //includes
@@ -22,6 +22,9 @@
 
 //lib i2c
 #include <Wire.h>
+
+//gerar sinais
+#include <waveforms.h>
 
 //Pinos de entrada e sa�da
 
@@ -52,6 +55,8 @@
 #define LDR_PIN A3
 #define LM35_PIN A4
 #define RXLED 3
+#define oneHzSample 1000000/maxSamplesNum //gerador de sinais
+#define SIMULATORSAMPLETIME 500
 
 float LM35_value;
 float LDR_value;
@@ -74,7 +79,7 @@ volatile int flow_frequency;
 
 
 //estrutura de dados para envio i2c
-typedef struct processData{
+typedef struct processData {
   float temp1;
   float temp2;
   float temp3;
@@ -86,7 +91,7 @@ typedef struct processData{
   byte chksum;
 };
 
-typedef union I2C_Send{ //compartilha a mesma área de memória
+typedef union I2C_Send { //compartilha a mesma área de memória
   processData data;
   byte I2C_packet[sizeof(processData)];
 };
@@ -120,6 +125,11 @@ String mode = "";
 
 //variáveis auxiliares para comando
 float pot_value_mapped;
+
+//variáveis para o simulador
+unsigned long current_sim_time;
+unsigned long simulator_time_elapsed;
+int indexwave;
 
 //inicialização de objetos
 OneWire oneWire(ONE_WIRE_BUS);
@@ -165,51 +175,52 @@ void parseSpeed(byte data[]);
 
 //testes em prototipo
 void Temperaturas2();
+void Simulator();
 
 // the setup function runs once when you press reset or power the board
 void setup() {
-	//painel
-	pinMode(but1, INPUT_PULLUP);
-	pinMode(but2, INPUT_PULLUP);
-	pinMode(pot, INPUT);
-	pinMode(mode_switch, INPUT);
-	pinMode(emergency_button, INPUT);
-	pinMode(led1, OUTPUT);
+  //painel
+  pinMode(but1, INPUT_PULLUP);
+  pinMode(but2, INPUT_PULLUP);
+  pinMode(pot, INPUT);
+  pinMode(mode_switch, INPUT);
+  pinMode(emergency_button, INPUT);
+  pinMode(led1, OUTPUT);
   pinMode(led2, OUTPUT);
-	pinMode(led_heater, OUTPUT);
+  pinMode(led_heater, OUTPUT);
 
-	//sensores
-	pinMode(ultrassonico_echo, INPUT);
-	pinMode(ultrassonico_trigger, OUTPUT);
-	pinMode(hf_sensor, INPUT_PULLUP);
-	pinMode(ONE_WIRE_BUS, INPUT_PULLUP);
+  //sensores
+  pinMode(ultrassonico_echo, INPUT);
+  pinMode(ultrassonico_trigger, OUTPUT);
+  pinMode(hf_sensor, INPUT_PULLUP);
+  pinMode(ONE_WIRE_BUS, INPUT_PULLUP);
 
-	//reles
-	pinMode(heater_rele, OUTPUT);
-	pinMode(inversor_rele, OUTPUT);
+  //reles
+  pinMode(heater_rele, OUTPUT);
+  pinMode(inversor_rele, OUTPUT);
 
-	//começar inversor desligado
+  //começar inversor desligado
   digitalWrite(inversor_rele, HIGH);
-    
+
   //habilitar a interrupção para medição de vazão fria
   attachInterrupt(hf_sensor, flow, RISING);
 
   //iniciar sensores de temperatura
   sensors.begin();
-  for (byte i = 0; i <= 4; i++){
+  for (byte i = 0; i <= 4; i++) {
     sensors.setResolution(deviceID[i], TEMPERATURE_PRECISION);
   }
-  
-  //iniciar lcd
-  lcd.begin(20,4);  //no original utilizar 20,4
 
-	//resolução de escrita do DAC
-	analogWriteResolution(10);
+  //iniciar lcd
+  lcd.begin(20, 4); //no original utilizar 20,4
+
+  //resolução de escrita do DAC
+  analogWriteResolution(10);
 
   //variáveis que guarda o status da bomba e do aquecedor
-	pump_onoff = 0;
+  pump_onoff = 0;
   heater_onoff = 0;
-    
+
   //inicialização da serial
   Serial.begin(115200);
 
@@ -218,6 +229,10 @@ void setup() {
   Wire.begin(12); //arduino iniciado no endereço 12
   Wire.onReceive(receiveEvent); //callback para recebimento de comandos
   Wire.onRequest(requestEvent); //callback para responder à requisições
+
+  //semente para o simulador
+  randomSeed(analogRead(LM35_PIN));
+  indexwave = 0;
 }
 
 
@@ -230,63 +245,64 @@ void loop() {
   /* lê se o botão de emergencia está acionado ou não
       cobre os casos de pressionar o botão e despressionar o botão
   */
-	if (digitalRead(emergency_button) == LOW){ //presisonado botão
-		emergencia();
-	}
-	else if (!digitalRead(emergency_button) == LOW && flag_emergency){ //despressionado o botão
-		flag_emergency = 0x00;
-		lcd.clear();
-		if(switch_state){
-            RemoteState();
-        }
-        else{
-            LocalState();
-        }
-	}
-	else{ //tudo normal
-		if(switch_state){
-            RemoteState();
-        }
-        else{
-            LocalState();
-        }
-	}
+  if (digitalRead(emergency_button) == LOW) { //presisonado botão
+    emergencia();
+  }
+  else if (!digitalRead(emergency_button) == LOW && flag_emergency) { //despressionado o botão
+    flag_emergency = 0x00;
+    emergency_status = 0;
+    lcd.clear();
+    if (switch_state) {
+      RemoteState();
+    }
+    else {
+      LocalState();
+    }
+  }
+  else { //tudo normal
+    if (switch_state) {
+      RemoteState();
+    }
+    else {
+      LocalState();
+    }
+  }
 }
 
 //função de interrupção para calcular a vazão
-void flow(){
+void flow() {
   flow_frequency++;
 }
 
 //funções que gerenciam o estado do arduino
 
-void LocalState(){
+void LocalState() {
 
   //efetua a leitura das grandezas
   runReads();
 
-    //atualiza o lcd com os novos valores
-	Menu(0);
+  //atualiza o lcd com os novos valores
+  Menu(0);
 
-	if (!digitalRead(but1)) flag_button1 = 0x01;
-	if (!digitalRead(but2)) flag_button2 = 0x01;
+  if (!digitalRead(but1)) flag_button1 = 0x01;
+  if (!digitalRead(but2)) flag_button2 = 0x01;
 
-	if (digitalRead(but1) && flag_button1){
-		flag_button1 = 0x00;
-		//troca o estado da bomba
-		digitalWrite(inversor_rele, pump_onoff);  //o estado da bomba � invertido
-		//digitalWrite(led_pump, !pump_onoff);  -> N�o � para utilizar o led
-		pump_onoff = !pump_onoff;
-	}
-
-	if (digitalRead(but2) && flag_button2){
-		flag_button2 = 0x00;
-		//troca o estado do aquecedor
-		digitalWrite(heater_rele, !heater_onoff);
-		digitalWrite(led_heater, !heater_onoff);
-		heater_onoff = !heater_onoff;
+  if (digitalRead(but1) && flag_button1) {
+    flag_button1 = 0x00;
+    //troca o estado da bomba
+    digitalWrite(inversor_rele, pump_onoff);  //o estado da bomba � invertido
+    //digitalWrite(led_pump, !pump_onoff);  -> N�o � para utilizar o led
+    pump_onoff = !pump_onoff;
   }
-    
+
+  if (digitalRead(but2) && flag_button2) {
+    flag_button2 = 0x00;
+    //troca o estado do aquecedor
+    digitalWrite(heater_rele, !heater_onoff);
+    digitalWrite(led_heater, !heater_onoff);
+    heater_onoff = !heater_onoff;
+  }
+
   //controlar a velocidade da bomba
   ReadPotentiometer();
   PumpSpeed(pot_value_mapped);
@@ -299,7 +315,7 @@ void LocalState(){
   refresh_I2C_Packet();
 }
 
-void RemoteState(){
+void RemoteState() {
   //faz a leitura das variáveis
   runReads();
 
@@ -307,61 +323,64 @@ void RemoteState(){
   Menu(1);
 
   //atualiza a estrutura de envio de dados via i2c
-  refresh_I2C_Packet();    
+  refresh_I2C_Packet();
 }
 
-void emergencia(){
-	//digitalWrite(led_flow_mode, LOW);//Apaga LED 1
-	digitalWrite(led_heater, LOW);//Apaga LED 2
-	digitalWrite(inversor_rele, HIGH);//Desliga a bomba
-	digitalWrite(heater_rele, LOW);//Desliga o aquecedor
+void emergencia() {
+  //digitalWrite(led_flow_mode, LOW);//Apaga LED 1
+  digitalWrite(led_heater, LOW);//Apaga LED 2
+  digitalWrite(inversor_rele, HIGH);//Desliga a bomba
+  digitalWrite(heater_rele, LOW);//Desliga o aquecedor
 
-	//vari�veis auxiliares
-	pump_onoff = 0x00;
+  //atualiza variável de emergência
+  emergency_status = 1;
+
+  //vari�veis auxiliares
+  pump_onoff = 0x00;
   heater_onoff = 0x00;
   remote_pumpspeed = 0.0;
 
-	//para evitar blinkar o lcd
-	if (!flag_emergency){
-		lcd.clear();
-		EmergencyStatus();
-	}
-	flag_emergency = 0x01;
+  //para evitar blinkar o lcd
+  if (!flag_emergency) {
+    lcd.clear();
+    EmergencyStatus();
+  }
+  flag_emergency = 0x01;
 }
 
 //funções para gerenciar a exibição do lcd
 
-void EmergencyStatus(){
-	lcd.setCursor(0, 0);
-	lcd.print("Emergencia");
-	lcd.setCursor(0, 1);
+void EmergencyStatus() {
+  lcd.setCursor(0, 0);
+  lcd.print("Emergencia");
+  lcd.setCursor(0, 1);
   lcd.print("Comandos");
-  lcd.setCursor(0,2);
+  lcd.setCursor(0, 2);
   lcd.print("Bloqueados");
 }
 
-void Menu(int op){
+void Menu(int op) {
 
-  mode = (op==1) ? "Remote Mode" : "Local  Mode";
+  mode = (op == 1) ? "Remote Mode" : "Local  Mode";
 
-  lcd.setCursor(0,0);
+  lcd.setCursor(0, 0);
   lcd.print(mode);
-    
-  lcd.setCursor(0,1);
+
+  lcd.setCursor(0, 1);
   lcd.print("TA: ");
   lcd.print(temp[0]);
   lcd.print("  ");
   lcd.print("TB: ");
   lcd.print(temp[1]);
 
-  lcd.setCursor(0,2);
+  lcd.setCursor(0, 2);
   lcd.print("TC: ");
   lcd.print(temp[2]);
   lcd.print("  ");
   lcd.print("TD: ");
   lcd.print(temp[3]);
 
-  lcd.setCursor(0,3);
+  lcd.setCursor(0, 3);
   lcd.print("V1: ");
   lcd.print(vazao_quente);
   lcd.print("  ");
@@ -370,11 +389,11 @@ void Menu(int op){
 
 }
 
-//funções de leitura (e escrita) das grandezas 
+//funções de leitura (e escrita) das grandezas
 
 void Temperaturas() {
 
-  // call sensors.requestTemperatures() to issue a global temperature 
+  // call sensors.requestTemperatures() to issue a global temperature
   // request to all devices on the bus
 
   sensors.requestTemperatures();
@@ -386,7 +405,7 @@ void Temperaturas() {
   }
 }
 
-void VazaoAguaFria(){
+void VazaoAguaFria() {
   currentTime = millis();
   // Every second, calculate litres/hour
   if (currentTime >= (cloopTime + 1000))
@@ -398,99 +417,123 @@ void VazaoAguaFria(){
   }
 }
 
-void VazaoAguaQuente(){
+void VazaoAguaQuente() {
 
   float vazao1_sf; //descobrir o porquê do nome da variavel
 
   microsec = ultrasonic.timing();
   cmMsec = ultrasonic.convert(microsec, Ultrasonic::CM);
   nivel = 11.46 - cmMsec;
-  vazao1_sf = (0.0537)* pow((nivel * 10), 1.4727);
-  if (vazao1_sf > 1){
-    vazao_quente = 0.75*vazao_quente + 0.25*vazao1_sf;
+  vazao1_sf = (0.0537) * pow((nivel * 10), 1.4727);
+  if (vazao1_sf > 1) {
+    vazao_quente = 0.75 * vazao_quente + 0.25 * vazao1_sf;
   }
 }
 
-void Temperaturas2(){
-  LM35_value = analogRead(LM35_PIN) *0.48875855;
+void Temperaturas2() {
+  LM35_value = analogRead(LM35_PIN) * 0.48875855;
   LDR_value = analogRead(LDR_PIN) / 10.0;
   temp[0] = LM35_value;
-  temp[1]= LDR_value;
+  temp[1] = LDR_value;
 }
 
-void PumpSpeed(float ref){
-	if (ref>100)
-		ref = 100;
-	else if (ref<0)
-		ref = 0;
-	analogWrite(DAC0, ref*9.43 + 80);
+void Simulator() {
+  current_sim_time = millis();
+  if (current_sim_time >= simulator_time_elapsed + SIMULATORSAMPLETIME) {
+
+    simulator_time_elapsed = current_sim_time;
+
+    for (int i = 0; i < 3; ++i) {
+      temp[i] = mapfloat(random(1024), 0, 1023, 10, 50);
+    }
+
+    //ultima temperatura com valor senoidal
+    temp[3] = mapfloat(waveformsTable[0][indexwave], 0, 4095, 0, 100);
+    indexwave++;
+    if (indexwave == maxSamplesNum) {
+      indexwave = 0;// Reset the counter to repeat the wave
+    }
+
+    vazao_quente = mapfloat(random(1024), 0, 1023, 0, 30);
+    vazao_fria = mapfloat(random(1024), 0, 1023, 0, 30);
+  }
 }
 
-void ReadPotentiometer(){
+
+void PumpSpeed(float ref) {
+  if (ref > 100)
+    ref = 100;
+  else if (ref < 0)
+    ref = 0;
+  analogWrite(DAC0, ref * 9.43 + 80);
+}
+
+void ReadPotentiometer() {
   pot_value = analogRead(pot);
   pot_value_mapped = mapfloat(pot_value, 0, 1023, 0, 100);
 }
 
-void runReads(){
+void runReads() {
   /*
-  Temperaturas();
-  VazaoAguaFria();
-  VazaoAguaQuente();
+    Temperaturas();
+    VazaoAguaFria();
+    VazaoAguaQuente();
   */
-  Temperaturas2();
+  //Temperaturas2();
+  Simulator();
 }
 
 
 //funções callback do i2c
-void receiveEvent(int Nbytes){
-    command = Wire.read();
-    
-    switch(command) {
-      case 49: //comando de teste
-        //comando liga bomba
-        digitalWrite(inversor_rele, LOW); //o estado da bomba é invertido
-        pump_onoff = 1;
-        break;
-  
-      case 50:
-        //comando desliga bomba
-        digitalWrite(inversor_rele,HIGH);
-        pump_onoff = 0;
-        break;
-  
-      case 51:
-        //comando liga aquecedor
-        digitalWrite(heater_rele,HIGH);
-        digitalWrite(led_heater,HIGH);
-        heater_onoff = 1;
-        break;
-  
-      case 52:
-        //comando desliga aquecedor
-        digitalWrite(heater_rele,LOW);
-        digitalWrite(led_heater,LOW);
-        heater_onoff = 0;
-        break;
-  
-      case 53:
-        //comando alterar velocidade da bomba
-        int i=0;
-        while(Wire.available()){
-          data[i] = Wire.read();
-          i = i + 1;
-        }
-        parseSpeed(data);
-        break;
-    }
-}
-  
-void requestEvent(){
-  if(command==6){
-    Wire.write(send_info.I2C_packet,sizeof(processData));
+void receiveEvent(int Nbytes) {
+  command = Wire.read();
+
+  switch (command) {
+    case 49: //comando de teste
+      //comando liga bomba
+      digitalWrite(inversor_rele, LOW); //o estado da bomba é invertido
+      pump_onoff = 1;
+      break;
+
+    case 50:
+      //comando desliga bomba
+      digitalWrite(inversor_rele, HIGH);
+      pump_onoff = 0;
+      break;
+
+    case 51:
+      //comando liga aquecedor
+      digitalWrite(heater_rele, HIGH);
+      digitalWrite(led_heater, HIGH);
+      heater_onoff = 1;
+      break;
+
+    case 52:
+      //comando desliga aquecedor
+      digitalWrite(heater_rele, LOW);
+      digitalWrite(led_heater, LOW);
+      heater_onoff = 0;
+      break;
+
+    case 53:
+      //comando alterar velocidade da bomba
+      int i = 0;
+      while (Wire.available()) {
+        data[i] = Wire.read();
+        i = i + 1;
+      }
+      parseSpeed(data);
+      break;
   }
 }
-  
-void parseSpeed(byte data[]){
+
+void requestEvent() {
+  if (command == 6) {
+    Wire.write(send_info.I2C_packet, sizeof(processData));
+  }
+}
+
+void parseSpeed(byte data[]) {
   //o primeiro byte é o número de bytes do envio; deve-se ignorar
   PumpDataSpeed speed;
   speed.bspeed[0] = data[1];
@@ -502,34 +545,34 @@ void parseSpeed(byte data[]){
   PumpSpeed(remote_pumpspeed); //envia o comando de velocidade para a bomba fisicamente
 }
 
-void refresh_I2C_Packet(){
+void refresh_I2C_Packet() {
   send_info.data.temp1 = temp[0];
   send_info.data.temp2 = temp[1];
   send_info.data.temp3 = temp[2];
   send_info.data.temp4 = temp[3];
-  
+
   //se a bomba estiver desligada, ignorar o valor do potenciometro
-  if(pump_onoff){
-    if(switch_state){
+  if (pump_onoff) {
+    if (switch_state) {
       send_info.data.pump_speed = remote_pumpspeed;
     }
-    else{
+    else {
       send_info.data.pump_speed = pot_value_mapped;
     }
   }
-  else{
+  else {
     send_info.data.pump_speed = 0.0;
   }
-    
-    
+
+
   send_info.data.hotflow = vazao_quente;
   send_info.data.coldflow = vazao_fria;
-  bitWrite(send_info.data.bstatus,0,pump_onoff);
-  bitWrite(send_info.data.bstatus,1,heater_onoff);
-  bitWrite(send_info.data.bstatus,2,switch_state);
-  bitWrite(send_info.data.bstatus,3,emergency_status);
+  bitWrite(send_info.data.bstatus, 0, pump_onoff);
+  bitWrite(send_info.data.bstatus, 1, heater_onoff);
+  bitWrite(send_info.data.bstatus, 2, switch_state);
+  bitWrite(send_info.data.bstatus, 3, emergency_status);
 }
-  
-float mapfloat(float x, float in_min, float in_max, float out_min, float out_max){
+
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }

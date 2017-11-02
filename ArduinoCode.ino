@@ -81,11 +81,10 @@ typedef struct processData{
   float hotflow;
   float coldflow;
   float pump_speed;
-  word bstatus;
-  word command;
+  uint16_t bstatus;
+  uint16_t command;
   float speedcommand;
-  word chksum;
-  
+  uint16_t chksum;
 };
 
 int command; //processar o indice de comando enviado pelo Rpi
@@ -102,8 +101,10 @@ typedef union modbus_read{
 
 modbus_read modbusinfo;
 
-//funções para detectar alteração de comandos
+//status do último comando
 int lastcommand;
+
+//ultima velocidade
 float lastspeed;
 
 //variáveis utilizadas no calculo de vazao de agua fria/quente
@@ -168,6 +169,7 @@ void runCommands(int command);
 
 //testes em prototipo
 void Temperaturas2();
+void Simulator();
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -221,6 +223,9 @@ void setup() {
   lastcommand = 0;
   modbusino_slave.setup(115200);
   modbusinfo.data.chksum = 27;
+
+  //semente para o simulador
+  randomSeed(analogRead(LM35_PIN));
 }
 
 
@@ -238,6 +243,7 @@ void loop() {
 	}
 	else if (!digitalRead(emergency_button) == LOW && flag_emergency){ //despressionado o botão
 		flag_emergency = 0x00;
+    emergency_status = 0;
 		lcd.clear();
 		if(switch_state){
             RemoteState();
@@ -322,6 +328,9 @@ void emergencia(){
 	digitalWrite(inversor_rele, HIGH);//Desliga a bomba
 	digitalWrite(heater_rele, LOW);//Desliga o aquecedor
 
+  //atualiza variável de emergência
+  emergency_status = 1;
+
 	//vari�veis auxiliares
 	pump_onoff = 0x00;
   heater_onoff = 0x00;
@@ -333,6 +342,7 @@ void emergencia(){
 		EmergencyStatus();
 	}
 	flag_emergency = 0x01;
+  refresh_modbus_packet();
 }
 
 //funções para gerenciar a exibição do lcd
@@ -424,6 +434,14 @@ void Temperaturas2(){
   temp[1]= LDR_value;
 }
 
+void Simulator(){
+  for(int i=0; i<4; ++i){
+    temp[i] = mapfloat(random(1024),0,1023,10,50);
+  }
+  vazao_quente = mapfloat(random(1024),0,1023,0,30);
+  vazao_fria = mapfloat(random(1024),0,1023,0,30);
+}
+
 void PumpSpeed(float ref){
 	if (ref>100)
 		ref = 100;
@@ -443,11 +461,13 @@ void runReads(){
   VazaoAguaFria();
   VazaoAguaQuente();
   */
-  Temperaturas2();
+  //Temperaturas2();
+  Simulator();
 }
 
 void detectChanges(){
   if(lastcommand != modbusinfo.data.command){
+    lastcommand = modbusinfo.data.command;
     runCommands(modbusinfo.data.command);
   }
 }
@@ -484,9 +504,13 @@ void runCommands(int command){
   
       case 53:
         //comando alterar velocidade da bomba
+        remote_pumpspeed = modbusinfo.data.speedcommand;
+        PumpSpeed(remote_pumpspeed);
         break;
-        PumpSpeed(lastspeed);
     }
+
+    //zera comando no pacote
+    modbusinfo.data.command = 0;
 }
 
 
@@ -516,6 +540,12 @@ void refresh_modbus_packet(){
   bitWrite(modbusinfo.data.bstatus,1,heater_onoff);
   bitWrite(modbusinfo.data.bstatus,2,switch_state);
   bitWrite(modbusinfo.data.bstatus,3,emergency_status);
+
+  //teste
+  modbusinfo.data.chksum = 27;
+
+  //loop_modbus
+  modbusino_slave.loop(modbusinfo.tab_reg, 19);
 }
   
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max){

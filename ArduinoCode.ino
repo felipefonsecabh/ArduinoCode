@@ -23,6 +23,9 @@
 //lib Modbus
 #include <Modbusino.h>
 
+//gerar sinais
+#include <waveforms.h>
+
 //Pinos de entrada e sa�da
 
 #define but1 A1  //no programa de testes 42; no original, trocar por A1  //
@@ -52,6 +55,8 @@
 #define LDR_PIN A3
 #define LM35_PIN A4
 #define RXLED 3
+#define oneHzSample 1000000/maxSamplesNum //gerador de sinais
+#define SIMULATORSAMPLETIME 500
 
 float LM35_value;
 float LDR_value;
@@ -123,6 +128,11 @@ String mode = "";
 
 //variáveis auxiliares para comando
 float pot_value_mapped;
+
+//variáveis para o simulador
+unsigned long current_sim_time;
+unsigned long simulator_time_elapsed;
+int indexwave;
 
 //inicialização de objetos
 OneWire oneWire(ONE_WIRE_BUS);
@@ -226,6 +236,7 @@ void setup() {
 
   //semente para o simulador
   randomSeed(analogRead(LM35_PIN));
+  indexwave = 0;
 }
 
 
@@ -435,11 +446,25 @@ void Temperaturas2(){
 }
 
 void Simulator(){
-  for(int i=0; i<4; ++i){
-    temp[i] = mapfloat(random(1024),0,1023,10,50);
+  current_sim_time = millis();
+  if(current_sim_time >= simulator_time_elapsed + SIMULATORSAMPLETIME){
+    
+    simulator_time_elapsed = current_sim_time;
+    
+    for(int i=0; i<3; ++i){
+      temp[i] = mapfloat(random(1024),0,1023,10,50);
+    }
+    
+    //ultima temperatura com valor senoidal
+    temp[3] = mapfloat(waveformsTable[0][indexwave],0,4095,0,100);
+    indexwave++;
+    if(indexwave == maxSamplesNum){
+      indexwave = 0;// Reset the counter to repeat the wave
+    }
+      
+    vazao_quente = mapfloat(random(1024),0,1023,0,30);
+    vazao_fria = mapfloat(random(1024),0,1023,0,30);
   }
-  vazao_quente = mapfloat(random(1024),0,1023,0,30);
-  vazao_fria = mapfloat(random(1024),0,1023,0,30);
 }
 
 void PumpSpeed(float ref){

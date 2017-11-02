@@ -503,7 +503,7 @@ void serialEvent(){
       }
 
     case 53:
-      if(switch_state){
+      if(switch_state){        
         //comando alterar velocidade da bomba
         jsoncmd = Serial.readStringUntil('\n');
         parseSpeed(jsoncmd);
@@ -513,6 +513,8 @@ void serialEvent(){
     case 54:
       // requisição de dados
       statejson.printTo(Serial);
+      Serial.print('\n');
+      //Serial.println();
       break;
 
   }
@@ -521,7 +523,7 @@ void serialEvent(){
 void parseSpeed(String jsoncmd){
   JsonObject& cmdjson = cmdbuffer.parseObject(jsoncmd);
   if(cmdjson.success()){
-    remote_pumpspeed = cmdjson["pumpspeed"];
+    remote_pumpspeed = cmdjson["pump_speed"];    
     PumpSpeed(remote_pumpspeed);
   }
   else{
@@ -536,6 +538,19 @@ void refresh_Json_packet(){
   }
   statejson["HotFlow"] = vazao_quente;
   statejson["ColdFlow"] = vazao_fria;
+
+  if(pump_onoff){
+    if(switch_state){
+      statejson["PumpSpeed"] = remote_pumpspeed;
+    }
+    else{
+      statejson["PumpSpeed"] = pot_value_mapped;
+    }
+  }
+  else{
+        statejson["PumpSpeed"]= 0.0;
+  }
+  
   
   bitWrite(bstatus,0,pump_onoff);
   bitWrite(bstatus,1,heater_onoff);

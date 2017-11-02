@@ -7,7 +7,6 @@
                 "C:\\Program Files (x86)\\Arduino\\libraries",
                 "C:\\Users\\fonseca.ELIPSE\\Documents\\Arduino\\libraries",
                 "C:\\Program Files (x86)\\Arduino"
-
             ],
             "browse": {
                 "limitSymbolsToIncludedHeaders": true,
@@ -21,5 +20,5 @@
             "intelliSenseMode": "msvc-x64"
         }
     ],
-    "version": 2
+    "version": 3
 }

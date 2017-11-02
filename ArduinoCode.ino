@@ -465,49 +465,69 @@ void runReads() {
 //funções callback do i2c
 void serialEvent(){
   command = Serial.read();
-  Serial.println(command);
-  
+    
   switch (command) {
   
     case 49: //comando de teste
-      //comando liga bomba
-      digitalWrite(inversor_rele, LOW); //o estado da bomba é invertido
-      pump_onoff = 1;
-      break;
-
+      if(switch_state){
+        //comando liga bomba
+        digitalWrite(inversor_rele, LOW); //o estado da bomba é invertido
+        pump_onoff = 1;
+        break;
+      }
+      
     case 50:
-      //comando desliga bomba
-      digitalWrite(inversor_rele, HIGH);
-      pump_onoff = 0;
-      break;
+      if(switch_state){
+        //comando desliga bomba
+        digitalWrite(inversor_rele, HIGH);
+        pump_onoff = 0;
+        break;
+      }
 
     case 51:
-      //comando liga aquecedor
-      digitalWrite(heater_rele, HIGH);
-      digitalWrite(led_heater, HIGH);
-      heater_onoff = 1;
-      break;
+      if(switch_state){
+        //comando liga aquecedor
+        digitalWrite(heater_rele, HIGH);
+        digitalWrite(led_heater, HIGH);
+        heater_onoff = 1;
+        break;
+      }
 
     case 52:
-      //comando desliga aquecedor
-      digitalWrite(heater_rele, LOW);
-      digitalWrite(led_heater, LOW);
-      heater_onoff = 0;
-      break;
+      if(switch_state){
+        //comando desliga aquecedor
+        digitalWrite(heater_rele, LOW);
+        digitalWrite(led_heater, LOW);
+        heater_onoff = 0;
+        break;
+      }
 
     case 53:
-      //comando alterar velocidade da bomba
-      jsoncmd = Serial.readStringUntil('\n');
-      JsonObject& cmdjson = cmdbuffer.parseObject(jsoncmd);
-      remote_pumpspeed = cmdjson["pumpspeed"];
-      PumpSpeed(remote_pumpspeed);
-      Serial.println(remote_pumpspeed);
-      break;
+      if(switch_state){
+        //comando alterar velocidade da bomba
+        jsoncmd = Serial.readStringUntil('\n');
+        parseSpeed(jsoncmd);
+        break;
+      }
 
-    case 54:  // requisição de dados
+    case 54:
+      // requisição de dados
       statejson.printTo(Serial);
       break;
+
   }
+}
+
+void parseSpeed(String jsoncmd){
+  JsonObject& cmdjson = cmdbuffer.parseObject(jsoncmd);
+  if(cmdjson.success()){
+    remote_pumpspeed = cmdjson["pumpspeed"];
+    PumpSpeed(remote_pumpspeed);
+  }
+  else{
+    Serial.println("parse failed");
+  }
+  cmdbuffer.clear();
 }
 
 void refresh_Json_packet(){

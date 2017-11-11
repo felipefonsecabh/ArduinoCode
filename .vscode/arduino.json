@@ -1,3 +1,5 @@
 {
-    "board": "arduino:sam:arduino_due_x"
+    "board": "arduino:sam:arduino_due_x_dbg",
+    "port": "COM5",
+    "sketch": "ArduinoCode.ino"
 }

@@ -194,7 +194,7 @@ void setup() {
     sensors.setResolution(deviceID[i], TEMPERATURE_PRECISION);
   }
   //modo de leitura assincrona
-  //sensors.setWaitForConversion(false);
+  sensors.setWaitForConversion(false);
   delayTempRead = 750 / (1 << (12 - TEMPERATURE_PRECISION));
 
   //iniciar lcd
@@ -394,7 +394,7 @@ void Temperaturas() {
   }
 }
 
-void new_Temepraturas(){
+void new_Temperaturas(){
   if(millis() - lastTempRequest > delayTempRead){
     for (byte i = 0; i <= 4; i++)
     {
@@ -474,10 +474,10 @@ void ReadPotentiometer() {
 
 void runReads() {
   
-    Temperaturas();
+    //Temperaturas();
     //VazaoAguaFria();
     VazaoAguaQuente();
-    //new_Temepraturas();
+    new_Temperaturas();
     //Temperaturas2();
   //Simulator();
 }

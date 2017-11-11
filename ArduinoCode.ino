@@ -39,7 +39,7 @@
 #define ultrassonico_trigger 48     //no original trocar para 48
 #define ONE_WIRE_BUS 52             //no original trocar para 52  - terminal do conjunto de sensores
 #define hf_sensor 9                //no original trocar para 9 -> pino de interrup��o para calculo da vaz�o agua fria
-#define TEMPERATURE_PRECISION 10
+#define TEMPERATURE_PRECISION 9    //a resolução de leitura vai de 9 a 12. quanto maior a resolução, mais demorada é a leitura
 
 
 #define led1 44                  // utilizado para sinalização geral
@@ -120,6 +120,9 @@ DeviceAddress deviceID[] =
   { 0x28, 0xFF, 0xE8, 0xF0, 0x53, 0x16, 0x04, 0x65 },
   { 0x28, 0x1D, 0x9D, 0x27, 0x00, 0x00, 0x80, 0x2E }
 };
+//delay necessário para leitura dos sensores. Depende da resolução
+int delayTempRead = 0;
+int lastTempRequest = millis();
 
 Ultrasonic ultrasonic(ultrassonico_trigger, ultrassonico_echo);
 
@@ -139,6 +142,7 @@ void PumpSpeed(float ref);  //função para alterar a velocidade da bomba
 void VazaoAguaFria();       //função para calcular a vazão de água fria
 void VazaoAguaQuente();     //função para calcular a vazão de água quente
 void Temperaturas();        //função para calcular as temperaturas dos sensores
+void new_Temperaturas();    //função que remodela a forma como mede a temperatura
 
 //funções do estado do arduino
 void LocalState();
@@ -182,13 +186,16 @@ void setup() {
   digitalWrite(inversor_rele, HIGH);
 
   //habilitar a interrupção para medição de vazão fria
-  attachInterrupt(hf_sensor, flow, RISING);
+  //attachInterrupt(hf_sensor, flow, RISING);
 
   //iniciar sensores de temperatura
   sensors.begin();
   for (byte i = 0; i <= 4; i++) {
     sensors.setResolution(deviceID[i], TEMPERATURE_PRECISION);
   }
+  //modo de leitura assincrona
+  //sensors.setWaitForConversion(false);
+  delayTempRead = 750 / (1 << (12 - TEMPERATURE_PRECISION));
 
   //iniciar lcd
   lcd.begin(20, 4); //no original utilizar 20,4
@@ -199,6 +206,8 @@ void setup() {
   //variáveis que guarda o status da bomba e do aquecedor
   pump_onoff = 0;
   heater_onoff = 0;
+  vazao_fria - 0;
+  vazao_quente = 0;
 
   //inicialização da serial
   Serial.begin(115200);
@@ -249,9 +258,10 @@ void loop() {
 }
 
 //função de interrupção para calcular a vazão
+/*
 void flow() {
   flow_frequency++;
-}
+}*/
 
 //funções que gerenciam o estado do arduino
 
@@ -384,6 +394,17 @@ void Temperaturas() {
   }
 }
 
+void new_Temepraturas(){
+  if(millis() - lastTempRequest > delayTempRead){
+    for (byte i = 0; i <= 4; i++)
+    {
+      temp[i] = sensors.getTempC(deviceID[i]);
+    }
+  }
+  lastTempRequest = millis();
+  sensors.requestTemperatures();
+}
+
 void VazaoAguaFria() {
   currentTime = millis();
   // Every second, calculate litres/hour
@@ -438,7 +459,6 @@ void Simulator() {
   }
 }
 
-
 void PumpSpeed(float ref) {
   if (ref > 100)
     ref = 100;
@@ -453,19 +473,19 @@ void ReadPotentiometer() {
 }
 
 void runReads() {
-  /*
+  
     Temperaturas();
-    VazaoAguaFria();
+    //VazaoAguaFria();
     VazaoAguaQuente();
-  */
-  //Temperaturas2();
-  Simulator();
+    //new_Temepraturas();
+    //Temperaturas2();
+  //Simulator();
 }
 
 //funções callback do i2c
 void serialEvent(){
   command = Serial.read();
-    
+  Serial.println("Chegou evnto");
   switch (command) {
   
     case 49: //comando de teste

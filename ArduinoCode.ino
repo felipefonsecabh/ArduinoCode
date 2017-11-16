@@ -76,7 +76,7 @@ float temp[4];
 double vazao_quente;
 float vazao_fria;
 volatile int flow_frequency;
-
+float vazao1_sf; 
 
 //estrutura de dados para envio i2c
 typedef struct processData {
@@ -117,6 +117,11 @@ float cmMsec;
 float nivel;
 //float vazao1_sf;   //se for necessário para a função de vazao quente, descomentar
 
+//variáveis para o temporizador de vazão de água quente
+unsigned long hotflow_time;
+int hotflow_interval;
+unsigned long last_hotflow_time;
+
 //variáveis auxiliares para operação local
 char flag_button1 = 0x00;
 char flag_button2 = 0x00;
@@ -142,7 +147,7 @@ DeviceAddress deviceID[] =
   { 0x28, 0x1D, 0x9D, 0x27, 0x00, 0x00, 0x80, 0x2E }
 };
 //delay necessário para leitura dos sensores. Depende da resolução
-int delayTempRead = 0;
+int delayTempRead = 750 / (1 << (12-TEMPERATURE_PRECISION));
 int lastTempRequest = millis();
 
 Ultrasonic ultrasonic(ultrassonico_trigger, ultrassonico_echo);
@@ -207,7 +212,7 @@ void setup() {
   digitalWrite(inversor_rele, HIGH);
 
   //habilitar a interrupção para medição de vazão fria
-  //attachInterrupt(hf_sensor, flow, RISING);
+  attachInterrupt(hf_sensor, flow, RISING);
 
   //iniciar sensores de temperatura
   sensors.begin();
@@ -215,7 +220,7 @@ void setup() {
     sensors.setResolution(deviceID[i], TEMPERATURE_PRECISION);
   }
   //modo de leitura assincrona
-  //sensors.setWaitForConversion(false);
+  sensors.setWaitForConversion(false);
   delayTempRead = 750 / (1 << (12 - TEMPERATURE_PRECISION));
 
   //iniciar lcd
@@ -234,6 +239,7 @@ void setup() {
   //inicialização de variáveis
   vazao_fria = 0;
   vazao_quente = 0;
+  hotflow_interval = 300; //tempo de execução do intervalo de medição de vazão quente
 
   //inicialização da estrutura i2c
   send_info.data.chksum = 27;
@@ -281,9 +287,9 @@ void loop() {
 }
 
 //função de interrupção para calcular a vazão
-/*void flow() {
+void flow() {
   flow_frequency++;
-}*/
+}
 
 //funções que gerenciam o estado do arduino
 
@@ -417,14 +423,15 @@ void Temperaturas() {
 }
 
 void new_Temperaturas(){
-  if(millis() - lastTempRequest > delayTempRead){
+  if(millis() - lastTempRequest > 1500){ //delayTempRead
     for (byte i = 0; i <= 4; i++)
     {
       temp[i] = sensors.getTempC(deviceID[i]);
     }
+    lastTempRequest = millis();
+    sensors.requestTemperatures();
   }
-  lastTempRequest = millis();
-  sensors.requestTemperatures();
+  
 }
 
 void VazaoAguaFria() {
@@ -433,22 +440,26 @@ void VazaoAguaFria() {
   if (currentTime >= (cloopTime + 1000))
   {
     cloopTime = currentTime; // Updates cloopTime
-    // Pulse frequency (Hz) = 7.5Q, Q is flow rate in L/min.
+    // Pulse frequency (Hz) = 7.5Q, Q is flow rate in L/min
+    noInterrupts();
     vazao_fria = (flow_frequency / 7.5); // (Pulse frequency) / 7.5Q = flowrate in L/min
     flow_frequency = 0; // Reset Counter
+    interrupts();
   }
 }
 
 void VazaoAguaQuente() {
 
-  float vazao1_sf; //descobrir o porquê do nome da variavel
-
-  microsec = ultrasonic.timing();
-  cmMsec = ultrasonic.convert(microsec, Ultrasonic::CM);
-  nivel = 11.46 - cmMsec;
-  vazao1_sf = (0.0537) * pow((nivel * 10), 1.4727);
-  if (vazao1_sf > 1) {
-    vazao_quente = 0.75 * vazao_quente + 0.25 * vazao1_sf;
+  hotflow_time = millis();
+  if(hotflow_time - last_hotflow_time > hotflow_interval){
+    microsec = ultrasonic.timing();
+    cmMsec = ultrasonic.convert(microsec, Ultrasonic::CM);
+    nivel = 11.46 - cmMsec;
+    vazao1_sf = (0.0537) * pow((nivel * 10), 1.4727);
+    if (vazao1_sf > 1) {
+      vazao_quente = 0.75 * vazao_quente + 0.25 * vazao1_sf;
+    }
+    last_hotflow_time = hotflow_time;
   }
 }
 
@@ -498,12 +509,12 @@ void ReadPotentiometer() {
 void runReads() {
   
     //Temperaturas();
-    //VazaoAguaFria();
-    //VazaoAguaQuente();
-    //new_Temperaturas();
+    VazaoAguaFria();
+    VazaoAguaQuente();
+    new_Temperaturas();
   
   //Temperaturas2();
-  Simulator();
+  //Simulator();
 }
 
 

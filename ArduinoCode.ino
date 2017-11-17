@@ -154,6 +154,28 @@ Ultrasonic ultrasonic(ultrassonico_trigger, ultrassonico_echo);
 
 LiquidCrystal lcd(41, 11, 12, 40, 13, 38);  //no original deve-se utilizar  LiquidCrystal lcd(41, 11, 12, 40, 13, 38);
 
+//timers para contagem do tempo de medição
+unsigned long start_temp_time;
+unsigned long stop_temp_time;
+unsigned long result_temp_time;
+
+unsigned long start_hotflow_time;
+unsigned long stop_hotflow_time;
+unsigned long result_hotflow_time;
+
+unsigned long start_coldflow_time;
+unsigned long stop_coldflow_time;
+unsigned long result_coldflow_time;
+
+unsigned long start_operation_time;
+unsigned long stop_operation_time;
+unsigned long result_operation_time;
+
+//buffers para medição da filtragem
+float temp_buffer[4];
+float coldflow_buffer;
+float hotflow_buffer;
+
 //funções
 void ReadPotentiometer();
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
@@ -182,9 +204,17 @@ void refresh_I2C_Packet();
 //função para receber o valor em bytes via i2c e retornar a velocidade em float
 void parseSpeed(byte data[]);
 
+
+//função de filtragem
+void Remove_TempSpike(float *temp_buffer, float temps[]);
+float Remove_ColdFlowSpike(float value);
+float Remove_HotFlowSpike(float value);
+
 //testes em prototipo
 void Temperaturas2();
 void Simulator();
+
+
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -424,12 +454,20 @@ void Temperaturas() {
 
 void new_Temperaturas(){
   if(millis() - lastTempRequest > 1500){ //delayTempRead
+    start_temp_time = micros();
     for (byte i = 0; i <= 4; i++)
     {
       temp[i] = sensors.getTempC(deviceID[i]);
+
     }
     lastTempRequest = millis();
     sensors.requestTemperatures();
+
+    //Remoçãod de spike
+    Remove_TempSpike(temp_buffer,temp);
+    //*temp = *temp_buffer;
+
+    result_temp_time = micros() - start_temp_time;
   }
   
 }
@@ -439,12 +477,19 @@ void VazaoAguaFria() {
   // Every second, calculate litres/hour
   if (currentTime >= (cloopTime + 1000))
   {
+    start_coldflow_time = micros();
     cloopTime = currentTime; // Updates cloopTime
     // Pulse frequency (Hz) = 7.5Q, Q is flow rate in L/min
     noInterrupts();
     vazao_fria = (flow_frequency / 7.5); // (Pulse frequency) / 7.5Q = flowrate in L/min
     flow_frequency = 0; // Reset Counter
     interrupts();
+
+    //remoção de spike
+    coldflow_buffer = Remove_ColdFlowSpike(vazao_fria);
+    //coldflow_buffer = vazao_fria;
+
+    stop_coldflow_time = micros();
   }
 }
 
@@ -452,6 +497,7 @@ void VazaoAguaQuente() {
 
   hotflow_time = millis();
   if(hotflow_time - last_hotflow_time > hotflow_interval){
+    start_hotflow_time = micros();
     microsec = ultrasonic.timing();
     cmMsec = ultrasonic.convert(microsec, Ultrasonic::CM);
     nivel = 11.46 - cmMsec;
@@ -460,6 +506,11 @@ void VazaoAguaQuente() {
       vazao_quente = 0.75 * vazao_quente + 0.25 * vazao1_sf;
     }
     last_hotflow_time = hotflow_time;
+
+    //remoção de spike
+    hotflow_buffer = Remove_HotFlowSpike(vazao_quente);
+
+    result_hotflow_time = micros() - start_hotflow_time;
   }
 }
 
@@ -487,8 +538,8 @@ void Simulator() {
       indexwave = 0;// Reset the counter to repeat the wave
     }
 
-    vazao_quente = mapfloat(random(1024), 0, 1023, 0, 30);
-    vazao_fria = mapfloat(random(1024), 0, 1023, 0, 30);
+    //vazao_quente = mapfloat(random(1024), 0, 1023, 0, 30);
+    //vazao_fria = mapfloat(random(1024), 0, 1023, 0, 30);
   }
 }
 
@@ -514,7 +565,7 @@ void runReads() {
     new_Temperaturas();
   
   //Temperaturas2();
-  //Simulator();
+   //Simulator();
 }
 
 
@@ -580,10 +631,11 @@ void parseSpeed(byte data[]) {
 }
 
 void refresh_I2C_Packet() {
-  send_info.data.temp1 = temp[0];
-  send_info.data.temp2 = temp[1];
-  send_info.data.temp3 = temp[2];
-  send_info.data.temp4 = temp[3];
+  start_operation_time = micros();
+  send_info.data.temp1 = temp_buffer[0];
+  send_info.data.temp2 = temp_buffer[1];
+  send_info.data.temp3 = temp_buffer[2];
+  send_info.data.temp4 = temp_buffer[3];
 
   //se a bomba estiver desligada, ignorar o valor do potenciometro
   if (pump_onoff) {
@@ -599,12 +651,47 @@ void refresh_I2C_Packet() {
   }
 
 
-  send_info.data.hotflow = vazao_quente;
-  send_info.data.coldflow = vazao_fria;
+  send_info.data.hotflow = hotflow_buffer;
+  send_info.data.coldflow = coldflow_buffer;
   bitWrite(send_info.data.bstatus, 0, pump_onoff);
   bitWrite(send_info.data.bstatus, 1, heater_onoff);
   bitWrite(send_info.data.bstatus, 2, switch_state);
   bitWrite(send_info.data.bstatus, 3, emergency_status);
+  result_operation_time = micros() - start_operation_time;
+}
+
+void Remove_TempSpike(float *temp_buffer, float temps[]){
+  float tempfiltered[4];
+  for(int i=0;i<4;i++){
+    if(temps[i]==- 127){ //valor ruim, deve ser mantido o valor anterior
+      tempfiltered[i] = temp_buffer[i];
+    }
+    else if(temps[i]< 0){
+      tempfiltered[i] = abs(temps[i]); //apenas um valor negativo
+    }
+    else if(abs(temps[i] - 2*temp_buffer[i])> 2){  //spike positivo
+      tempfiltered[i] = temp_buffer[i];
+    }
+    else{ //valor ok
+      tempfiltered[i] = temps[i]; //pega o valor atual
+    }
+  }
+  temp_buffer = tempfiltered;
+}
+
+float Remove_ColdFlowSpike(float value){
+  if(value < 0){
+    return(abs(value)); //único spike observado foi o valor vir negativo
+  }
+}
+
+float Remove_HotFlowSpike(float value){
+  if(abs(value - hotflow_buffer) > 5){
+    return(hotflow_buffer); //mantem o valor anterior)
+  }
+  else{
+    return(value);
+  }
 }
 
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max) {

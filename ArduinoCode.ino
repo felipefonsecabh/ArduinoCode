@@ -94,6 +94,7 @@ typedef struct processData {
 typedef union I2C_Send { //compartilha a mesma área de memória
   processData data;
   byte I2C_packet[sizeof(processData)];
+  char serial_packet[sizeof(processData)];
 };
 
 
@@ -156,20 +157,22 @@ LiquidCrystal lcd(41, 11, 12, 40, 13, 38);  //no original deve-se utilizar  Liqu
 
 //timers para contagem do tempo de medição
 unsigned long start_temp_time;
-unsigned long stop_temp_time;
 unsigned long result_temp_time;
 
 unsigned long start_hotflow_time;
-unsigned long stop_hotflow_time;
 unsigned long result_hotflow_time;
 
 unsigned long start_coldflow_time;
-unsigned long stop_coldflow_time;
 unsigned long result_coldflow_time;
 
 unsigned long start_operation_time;
-unsigned long stop_operation_time;
 unsigned long result_operation_time;
+
+unsigned long start_command_time;
+unsigned long result_command_time;
+
+unsigned long start_send_time;
+unsigned long result_send_time;
 
 //estatísticas
 unsigned long temp_errors;
@@ -219,10 +222,6 @@ void parseSpeed(byte data[]);
 void Remove_TempSpike(float *temp_buffer, float temps[]);
 float Remove_ColdFlowSpike(float value);
 float Remove_HotFlowSpike(float value);
-
-bool FirstTempReading = false; //para fazer o filtro funcionar
-bool FirstHotFlowReading = false;
-bool FirstColdFlowReading = false;
 
 void PrintStatitics();
 
@@ -287,6 +286,7 @@ void setup() {
   vazao_quente = 0;
   hotflow_interval = 300; //tempo de execução do intervalo de medição de vazão quente
   statitics_time = millis();
+  start_time = millis();
 
   //inicialização da estrutura i2c
   send_info.data.chksum = 27;
@@ -331,7 +331,7 @@ void loop() {
       LocalState();
     }
   }
-  //PrintStatitics();
+  PrintStatitics();
 }
 
 //função de interrupção para calcular a vazão
@@ -511,12 +511,10 @@ void VazaoAguaFria() {
 
     /*if(millis() > start_time < 5000){
       coldflow_buffer = vazao_fria;
-      //FirstColdFlowReading = true;
     }
     else{
       //remoção de spike
       coldflow_buffer = Remove_ColdFlowSpike(vazao_fria);
-      //coldflow_buffer = vazao_fria;
     }*/
     
 
@@ -540,7 +538,6 @@ void VazaoAguaQuente() {
 
     if(millis() - start_time < 5000){
       hotflow_buffer = vazao_quente;
-      
     }
     else{
       //remoção de spike
@@ -575,11 +572,10 @@ void Simulator() {
       indexwave = 0;// Reset the counter to repeat the wave
     }
 
-    //vazao_quente = mapfloat(random(1024), 0, 1023, 0, 30);
-    //vazao_fria = mapfloat(random(1024), 0, 1023, 0, 30);
+    vazao_quente = mapfloat(random(1024), 0, 1023, 0, 30);
+    vazao_fria = mapfloat(random(1024), 0, 1023, 0, 30);
   }
 }
-
 
 void PumpSpeed(float ref) {
   if (ref > 100)
@@ -597,17 +593,19 @@ void ReadPotentiometer() {
 void runReads() {
   
     //Temperaturas();
-    VazaoAguaFria();
-    VazaoAguaQuente();
-    new_Temperaturas();
+    //VazaoAguaFria();
+    //VazaoAguaQuente();
+    //new_Temperaturas();
   
   //Temperaturas2();
-   //Simulator();
+   Simulator();
 }
 
 
 //funções callback do i2c
 void receiveEvent(int Nbytes) {
+
+  start_command_time = micros();
   command = Wire.read();
 
   switch (command) {
@@ -615,12 +613,14 @@ void receiveEvent(int Nbytes) {
       //comando liga bomba
       digitalWrite(inversor_rele, LOW); //o estado da bomba é invertido
       pump_onoff = 1;
+      result_command_time = micros() - start_command_time;
       break;
 
     case 50:
       //comando desliga bomba
       digitalWrite(inversor_rele, HIGH);
       pump_onoff = 0;
+      result_command_time = micros() - start_command_time;
       break;
 
     case 51:
@@ -628,6 +628,7 @@ void receiveEvent(int Nbytes) {
       digitalWrite(heater_rele, HIGH);
       digitalWrite(led_heater, HIGH);
       heater_onoff = 1;
+      result_command_time = micros() - start_command_time;
       break;
 
     case 52:
@@ -635,6 +636,7 @@ void receiveEvent(int Nbytes) {
       digitalWrite(heater_rele, LOW);
       digitalWrite(led_heater, LOW);
       heater_onoff = 0;
+      result_command_time = micros() - start_command_time;
       break;
 
     case 53:
@@ -645,13 +647,18 @@ void receiveEvent(int Nbytes) {
         i = i + 1;
       }
       parseSpeed(data);
+      result_command_time = micros() - start_command_time;
       break;
   }
+
 }
 
 void requestEvent() {
   if (command == 54) {
+    start_send_time = micros();
     Wire.write(send_info.I2C_packet, sizeof(processData));
+    result_send_time = micros() - start_send_time;
+    Serial.println(send_info.serial_packet); //teste de corrompimento de pacote
   }
 }
 
@@ -668,11 +675,12 @@ void parseSpeed(byte data[]) {
 }
 
 void refresh_I2C_Packet() {
+  noInterrupts();
   start_operation_time = micros();
-  send_info.data.temp1 = temp_buffer[0];  //temp_buffer[0];
-  send_info.data.temp2 = temp_buffer[1];  //temp_buffer[1];
-  send_info.data.temp3 = temp_buffer[2];  //temp_buffer[2];
-  send_info.data.temp4 = temp_buffer[3];  //temp_buffer[3];
+  send_info.data.temp1 = temp[0];  //temp_buffer[0];
+  send_info.data.temp2 = temp[1];  //temp_buffer[1];
+  send_info.data.temp3 = temp[2];  //temp_buffer[2];
+  send_info.data.temp4 = temp[3];  //temp_buffer[3];
 
   //se a bomba estiver desligada, ignorar o valor do potenciometro
   if (pump_onoff) {
@@ -688,12 +696,13 @@ void refresh_I2C_Packet() {
   }
 
 
-  send_info.data.hotflow = hotflow_buffer;
-  send_info.data.coldflow = vazao_fria;
+  send_info.data.hotflow = vazao_quente;   //vazao_quente -> hotflow_buffer
+  send_info.data.coldflow = vazao_fria;      //vazao_fria -> coldflow_buffer
   bitWrite(send_info.data.bstatus, 0, pump_onoff);
   bitWrite(send_info.data.bstatus, 1, heater_onoff);
   bitWrite(send_info.data.bstatus, 2, switch_state);
   bitWrite(send_info.data.bstatus, 3, emergency_status);
+  interrupts();
   result_operation_time = micros() - start_operation_time;
 }
 
@@ -703,28 +712,26 @@ void Remove_TempSpike(float *temp_buffer, float temps[]){
     if(temps[i]==- 127){ //valor ruim, deve ser mantido o valor anterior
       temp_errors++;
     }
-    else if(temps[i]< 0){
-      temp_buffer[i] = abs(temps[i]); //apenas um valor negativo
-      temp_errors++;
-    }
     else{ //valor ok
       temp_buffer[i] = temps[i]; //pega o valor atual
     }
-    /*
-    else if(abs(temps[i] - 2*temp_buffer[i])> 2){  //spike positivo
-      tempfiltered[i] = temp_buffer[i];
-    }*/
   } 
-  //temp_buffer = tempfiltered;
 }
-
+/*
+Funções de anti-spike comentadas porque essas funções não fizeram tanta diferença
+*/
+/*
 float Remove_ColdFlowSpike(float value){
   if(value < 0){
     return(abs(value)); //único spike observado foi o valor vir negativo
     coldflow_errors++;
   }
-}
+  else{
+    return(value);
+  }
+}*/
 
+/*
 float Remove_HotFlowSpike(float value){
   if(abs(value - hotflow_buffer) > 5){
     return(hotflow_buffer); //mantem o valor anterior)
@@ -734,7 +741,8 @@ float Remove_HotFlowSpike(float value){
     return(value);
   }
   
-}
+}*/
+
 void PrintStatitics(){
   if(millis() - statitics_time > statitics_interval){
 
@@ -747,6 +755,10 @@ void PrintStatitics(){
     Serial.print(result_coldflow_time);
     Serial.print(" ");
     Serial.print(result_operation_time);
+    Serial.print(" ");
+    Serial.print(result_command_time);
+    Serial.print(" ");
+    Serial.print(result_send_time);
     Serial.print("/");
     Serial.print(temp_errors);
     Serial.print(" ");

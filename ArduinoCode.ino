@@ -171,6 +171,16 @@ unsigned long start_operation_time;
 unsigned long stop_operation_time;
 unsigned long result_operation_time;
 
+//estatísticas
+unsigned long temp_errors;
+unsigned long hotflow_errors;
+unsigned long coldflow_errors;
+unsigned long statitics_time;
+int statitics_interval = 1000;
+
+//uma contagem de tempo inicial
+unsigned long start_time;
+
 //buffers para medição da filtragem
 float temp_buffer[4];
 float coldflow_buffer;
@@ -209,6 +219,12 @@ void parseSpeed(byte data[]);
 void Remove_TempSpike(float *temp_buffer, float temps[]);
 float Remove_ColdFlowSpike(float value);
 float Remove_HotFlowSpike(float value);
+
+bool FirstTempReading = false; //para fazer o filtro funcionar
+bool FirstHotFlowReading = false;
+bool FirstColdFlowReading = false;
+
+void PrintStatitics();
 
 //testes em prototipo
 void Temperaturas2();
@@ -270,6 +286,7 @@ void setup() {
   vazao_fria = 0;
   vazao_quente = 0;
   hotflow_interval = 300; //tempo de execução do intervalo de medição de vazão quente
+  statitics_time = millis();
 
   //inicialização da estrutura i2c
   send_info.data.chksum = 27;
@@ -314,6 +331,7 @@ void loop() {
       LocalState();
     }
   }
+  //PrintStatitics();
 }
 
 //função de interrupção para calcular a vazão
@@ -453,20 +471,26 @@ void Temperaturas() {
 }
 
 void new_Temperaturas(){
-  if(millis() - lastTempRequest > 1500){ //delayTempRead
+  if(millis() - lastTempRequest > delayTempRead){ //delayTempRead
     start_temp_time = micros();
     for (byte i = 0; i <= 4; i++)
     {
       temp[i] = sensors.getTempC(deviceID[i]);
 
     }
+    
     lastTempRequest = millis();
     sensors.requestTemperatures();
 
-    //Remoçãod de spike
-    Remove_TempSpike(temp_buffer,temp);
-    //*temp = *temp_buffer;
-
+    if(millis() - start_time < 5000){
+      *temp_buffer = *temp;
+    }
+    else{
+      //Remoçãod de spike
+      Remove_TempSpike(temp_buffer,temp);
+      //*temp = *temp_buffer;
+    }
+  
     result_temp_time = micros() - start_temp_time;
   }
   
@@ -485,11 +509,18 @@ void VazaoAguaFria() {
     flow_frequency = 0; // Reset Counter
     interrupts();
 
-    //remoção de spike
-    coldflow_buffer = Remove_ColdFlowSpike(vazao_fria);
-    //coldflow_buffer = vazao_fria;
+    /*if(millis() > start_time < 5000){
+      coldflow_buffer = vazao_fria;
+      //FirstColdFlowReading = true;
+    }
+    else{
+      //remoção de spike
+      coldflow_buffer = Remove_ColdFlowSpike(vazao_fria);
+      //coldflow_buffer = vazao_fria;
+    }*/
+    
 
-    stop_coldflow_time = micros();
+    result_coldflow_time = micros() - start_coldflow_time;
   }
 }
 
@@ -507,8 +538,14 @@ void VazaoAguaQuente() {
     }
     last_hotflow_time = hotflow_time;
 
-    //remoção de spike
-    hotflow_buffer = Remove_HotFlowSpike(vazao_quente);
+    if(millis() - start_time < 5000){
+      hotflow_buffer = vazao_quente;
+      
+    }
+    else{
+      //remoção de spike
+      hotflow_buffer = Remove_HotFlowSpike(vazao_quente);
+    }
 
     result_hotflow_time = micros() - start_hotflow_time;
   }
@@ -532,7 +569,7 @@ void Simulator() {
     }
 
     //ultima temperatura com valor senoidal
-    temp[3] = mapfloat(waveformsTable[0][indexwave], 0, 4095, 0, 100);
+    temp[3] = mapfloat(waveformsTable[0][indexwave], 0, 4095, 0, 50);
     indexwave++;
     if (indexwave == maxSamplesNum) {
       indexwave = 0;// Reset the counter to repeat the wave
@@ -632,10 +669,10 @@ void parseSpeed(byte data[]) {
 
 void refresh_I2C_Packet() {
   start_operation_time = micros();
-  send_info.data.temp1 = temp_buffer[0];
-  send_info.data.temp2 = temp_buffer[1];
-  send_info.data.temp3 = temp_buffer[2];
-  send_info.data.temp4 = temp_buffer[3];
+  send_info.data.temp1 = temp_buffer[0];  //temp_buffer[0];
+  send_info.data.temp2 = temp_buffer[1];  //temp_buffer[1];
+  send_info.data.temp3 = temp_buffer[2];  //temp_buffer[2];
+  send_info.data.temp4 = temp_buffer[3];  //temp_buffer[3];
 
   //se a bomba estiver desligada, ignorar o valor do potenciometro
   if (pump_onoff) {
@@ -652,7 +689,7 @@ void refresh_I2C_Packet() {
 
 
   send_info.data.hotflow = hotflow_buffer;
-  send_info.data.coldflow = coldflow_buffer;
+  send_info.data.coldflow = vazao_fria;
   bitWrite(send_info.data.bstatus, 0, pump_onoff);
   bitWrite(send_info.data.bstatus, 1, heater_onoff);
   bitWrite(send_info.data.bstatus, 2, switch_state);
@@ -661,36 +698,63 @@ void refresh_I2C_Packet() {
 }
 
 void Remove_TempSpike(float *temp_buffer, float temps[]){
-  float tempfiltered[4];
+ 
   for(int i=0;i<4;i++){
     if(temps[i]==- 127){ //valor ruim, deve ser mantido o valor anterior
-      tempfiltered[i] = temp_buffer[i];
+      temp_errors++;
     }
     else if(temps[i]< 0){
-      tempfiltered[i] = abs(temps[i]); //apenas um valor negativo
-    }
-    else if(abs(temps[i] - 2*temp_buffer[i])> 2){  //spike positivo
-      tempfiltered[i] = temp_buffer[i];
+      temp_buffer[i] = abs(temps[i]); //apenas um valor negativo
+      temp_errors++;
     }
     else{ //valor ok
-      tempfiltered[i] = temps[i]; //pega o valor atual
+      temp_buffer[i] = temps[i]; //pega o valor atual
     }
-  }
-  temp_buffer = tempfiltered;
+    /*
+    else if(abs(temps[i] - 2*temp_buffer[i])> 2){  //spike positivo
+      tempfiltered[i] = temp_buffer[i];
+    }*/
+  } 
+  //temp_buffer = tempfiltered;
 }
 
 float Remove_ColdFlowSpike(float value){
   if(value < 0){
     return(abs(value)); //único spike observado foi o valor vir negativo
+    coldflow_errors++;
   }
 }
 
 float Remove_HotFlowSpike(float value){
   if(abs(value - hotflow_buffer) > 5){
     return(hotflow_buffer); //mantem o valor anterior)
+    hotflow_errors++;
   }
   else{
     return(value);
+  }
+  
+}
+void PrintStatitics(){
+  if(millis() - statitics_time > statitics_interval){
+
+    statitics_time = millis();
+    
+    Serial.print(result_temp_time);
+    Serial.print(" ");
+    Serial.print(result_hotflow_time);
+    Serial.print(" ");
+    Serial.print(result_coldflow_time);
+    Serial.print(" ");
+    Serial.print(result_operation_time);
+    Serial.print("/");
+    Serial.print(temp_errors);
+    Serial.print(" ");
+    Serial.print(hotflow_errors);
+    Serial.print(" ");
+    Serial.print(coldflow_errors);
+    Serial.print(" ");
+    Serial.println("");
   }
 }
 

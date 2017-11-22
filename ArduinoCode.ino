@@ -16,52 +16,42 @@
 //display lcd
 #include <LiquidCrystal.h>
 
-//timed action
-//#include <Utility.h>
-//#include <TimedAction.h>
-
 //lib i2c
 #include <Wire.h>
 
-//gerar sinais
+//gerar sinais de simulação caso necessário
 #include <waveforms.h>
 
-//Pinos de entrada e sa�da
+//Pinos de entrada e saída
 
-#define but1 A1  //no programa de testes 42; no original, trocar por A1  //
-#define but2 A2  //no programa de testes 44; no original trocar por A2
-#define pot A0 //no programa de testes A7; no original trocar por A0
+#define but1 A1  
+#define but2 A2  
+#define pot A0 
 
-#define mode_switch 42  //no programa de testes 43; no original trocar por 42
-#define emergency_button 43 //no programa de testes 51; no original  trocar por 43
+#define mode_switch 42  
+#define emergency_button 43 
 
-#define ultrassonico_echo	50      //no original trocar para 50
-#define ultrassonico_trigger 48     //no original trocar para 48
-#define ONE_WIRE_BUS 52             //no original trocar para 52  - terminal do conjunto de sensores
-#define hf_sensor 9                //no original trocar para 9 -> pino de interrup��o para calculo da vaz�o agua fria
-#define TEMPERATURE_PRECISION 10
+#define ultrassonico_echo	50      
+#define ultrassonico_trigger 48     
+#define ONE_WIRE_BUS 52             
+#define hf_sensor 9                
+#define TEMPERATURE_PRECISION 12
 
+#define led1 44                  
+#define led2 45                  
+#define led_heater 47            
 
-#define led1 44                  // utilizado para sinalização geral
-#define led2 45                  // utilizado para sinalização geral
-#define led_heater 47            // no programa de testes 37; no original trocar para 47
+#define inversor_rele 49        
+#define heater_rele 10          
 
-#define inversor_rele 49        //no programa de teste 47;no original trocar para 49
-#define heater_rele 10          //no programa de testes 49;no original trocar para 10
-
-#define MAX_MENU_ITENS 2         //numero de telas no menu
+#define MAX_MENU_ITENS 2         
 
 //testes em prototipo
-#define LDR_PIN A3
-#define LM35_PIN A4
-#define RXLED 3
-#define oneHzSample 1000000/maxSamplesNum //gerador de sinais
+#define oneHzSample 1000000/maxSamplesNum //gerador de sinais de simulação
 #define SIMULATORSAMPLETIME 500
 
-float LM35_value;
-float LDR_value;
 
-//vari�veis internas
+//variáveis internas
 
 //armazenar valores de entrada
 bool switch_state;
@@ -72,11 +62,8 @@ volatile int pump_onoff;
 volatile int heater_onoff;
 volatile float remote_pumpspeed;
 
+//vetor para armazenar a leitura de temperaturas
 float temp[4];
-double vazao_quente;
-float vazao_fria;
-volatile int flow_frequency;
-float vazao1_sf; 
 
 //estrutura de dados para envio i2c
 typedef struct processData {
@@ -94,6 +81,7 @@ typedef struct processData {
 typedef union I2C_Send { //compartilha a mesma área de memória
   processData data;
   byte I2C_packet[sizeof(processData)];
+  char serial_packet[sizeof(processData)];
 };
 
 
@@ -115,10 +103,10 @@ unsigned long cloopTime;
 long microsec;
 float cmMsec;
 float nivel;
-//float vazao1_sf;   //se for necessário para a função de vazao quente, descomentar
-
-float hotflow_filtered;
-float alpha = 0.95;    //coeficiente do filtro de primeira ordem
+float raw_coldflow_value;
+double vazao_quente;
+float vazao_fria;
+volatile int flow_frequency;
 
 //variáveis para o temporizador de vazão de água quente
 unsigned long hotflow_time;
@@ -157,42 +145,14 @@ Ultrasonic ultrasonic(ultrassonico_trigger, ultrassonico_echo);
 
 LiquidCrystal lcd(41, 11, 12, 40, 13, 38);  //no original deve-se utilizar  LiquidCrystal lcd(41, 11, 12, 40, 13, 38);
 
-//timers para contagem do tempo de medição
-unsigned long start_temp_time;
-unsigned long result_temp_time;
-
-unsigned long start_hotflow_time;
-unsigned long result_hotflow_time;
-
-unsigned long start_coldflow_time;
-unsigned long result_coldflow_time;
-
-unsigned long start_operation_time;
-unsigned long result_operation_time;
-
-unsigned long start_command_time;
-unsigned long result_command_time;
-
-unsigned long start_send_time;
-unsigned long result_send_time;
-
-unsigned long start_total_time;
-unsigned long result_total_time;
-
 //estatísticas
-unsigned long temp_errors;
-unsigned long hotflow_errors;
-unsigned long coldflow_errors;
-unsigned long statitics_time;
-int statitics_interval = 1000;
+unsigned long temp_errors;  //número de erros de envio da leitura de temperatura
 
 //uma contagem de tempo inicial
 unsigned long start_time;
 
 //buffers para medição da filtragem
 float temp_buffer[4];
-float coldflow_buffer;
-float hotflow_buffer;
 
 //funções
 void ReadPotentiometer();
@@ -208,7 +168,6 @@ void PumpSpeed(float ref);  //função para alterar a velocidade da bomba
 void VazaoAguaFria();       //função para calcular a vazão de água fria
 void VazaoAguaQuente();     //função para calcular a vazão de água quente
 void Temperaturas();        //função para calcular as temperaturas dos sensores
-void new_Temperaturas();
 
 //funções do estado do arduino
 void LocalState();
@@ -222,16 +181,10 @@ void refresh_I2C_Packet();
 //função para receber o valor em bytes via i2c e retornar a velocidade em float
 void parseSpeed(byte data[]);
 
-
 //função de filtragem
 void Remove_TempSpike(float *temp_buffer, float temps[]);
-float Remove_ColdFlowSpike(float value);
-float Remove_HotFlowSpike(float value);
 
-void PrintStatitics();
-
-//testes em prototipo
-void Temperaturas2();
+//função para simulação de valores
 void Simulator();
 
 
@@ -290,7 +243,6 @@ void setup() {
   vazao_fria = 0;
   vazao_quente = 0;
   hotflow_interval = 300; //tempo de execução do intervalo de medição de vazão quente
-  statitics_time = millis();
   start_time = millis();
 
   //inicialização da estrutura i2c
@@ -300,7 +252,7 @@ void setup() {
   Wire.onRequest(requestEvent); //callback para responder à requisições
 
   //semente para o simulador
-  randomSeed(analogRead(LM35_PIN));
+  randomSeed(2);
   indexwave = 0;
 }
 
@@ -308,7 +260,6 @@ void setup() {
 // the loop function runs over and over again until power down or reset
 void loop() {
 
-  start_total_time = micros();
   // le o estado da chave
   switch_state = digitalRead(mode_switch);
 
@@ -337,8 +288,6 @@ void loop() {
       LocalState();
     }
   }
-  result_total_time = micros()  - start_total_time;
-  //PrintStatitics();
 }
 
 //função de interrupção para calcular a vazão
@@ -407,7 +356,7 @@ void emergencia() {
   //atualiza variável de emergência
   emergency_status = 1;
 
-  //vari�veis auxiliares
+  //variáveis auxiliares
   pump_onoff = 0x00;
   heater_onoff = 0x00;
   remote_pumpspeed = 0.0;
@@ -440,17 +389,17 @@ void Menu(int op) {
 
   lcd.setCursor(0, 1);
   lcd.print("TA: ");
-  lcd.print(temp[0]);
+  lcd.print(temp_buffer[0]);
   lcd.print("  ");
   lcd.print("TB: ");
-  lcd.print(temp[1]);
+  lcd.print(temp_buffer[1]);
 
   lcd.setCursor(0, 2);
   lcd.print("TC: ");
-  lcd.print(temp[2]);
+  lcd.print(temp_buffer[2]);
   lcd.print("  ");
   lcd.print("TD: ");
-  lcd.print(temp[3]);
+  lcd.print(temp_buffer[3]);
 
   lcd.setCursor(0, 3);
   lcd.print("V1: ");
@@ -462,103 +411,53 @@ void Menu(int op) {
 }
 
 //funções de leitura (e escrita) das grandezas
-
-void Temperaturas() {
-
-  // call sensors.requestTemperatures() to issue a global temperature
-  // request to all devices on the bus
-
-  sensors.requestTemperatures();
-
-  // print the device information
-  for (byte i = 0; i <= 4; i++)
-  {
-    temp[i] = sensors.getTempC(deviceID[i]);
-  }
-}
-
-void new_Temperaturas(){
-  if(millis() - lastTempRequest > 2000){ //delayTempRead
-    start_temp_time = micros();
+void Temperaturas(){
+  if(millis() - lastTempRequest > delayTempRead){ //delayTempRead
+    lastTempRequest = millis();
     for (byte i = 0; i <= 4; i++)
     {
-      temp[i] = sensors.getTempC(deviceID[i]);
+      temp[i] = sensors.getTempC(deviceID[i]); //captura as temperaturas do sensor
 
     }
-    
-    lastTempRequest = millis();
-    sensors.requestTemperatures();
+  
+    sensors.requestTemperatures();  //faz nova requisição por temperatura 
 
-    if(millis() - start_time < 5000){
+    if(millis() - start_time < 5000){  //insere um tempo de acomodação para começar a remover os spikes
       *temp_buffer = *temp;
     }
     else{
-      //Remoçãod de spike
-      Remove_TempSpike(temp_buffer,temp);
+      Remove_TempSpike(temp_buffer,temp); //lógica de remoção de spike
     }
-  
-    result_temp_time = micros() - start_temp_time;
-  }
-  
+  } 
 }
 
 void VazaoAguaFria() {
   currentTime = millis();
   // Every second, calculate litres/hour
-  if (currentTime >= (cloopTime + 1000))
+  if (currentTime >= (cloopTime + 1000)) //função só calcula a vazão a cada segundo
   {
-    start_coldflow_time = micros();
-    cloopTime = currentTime; // Updates cloopTime
+    cloopTime = currentTime; // atualiza tempo para próxima execução
     // Pulse frequency (Hz) = 7.5Q, Q is flow rate in L/min
     noInterrupts();
     vazao_fria = (flow_frequency / 7.5); // (Pulse frequency) / 7.5Q = flowrate in L/min
     flow_frequency = 0; // Reset Counter
     interrupts();
-
-    /*if(millis() - start_time < 5000){
-      coldflow_buffer = vazao_fria;
-    }
-    else{
-      //remoção de spike
-      coldflow_buffer = Remove_ColdFlowSpike(vazao_fria);
-    }*/
-    
-
-    result_coldflow_time = micros() - start_coldflow_time;
   }
 }
 
 void VazaoAguaQuente() {
 
-  hotflow_time = millis();
-  if(hotflow_time - last_hotflow_time > hotflow_interval){
-    last_hotflow_time = hotflow_time;
-    start_hotflow_time = micros();
+  hotflow_time = millis(); 
+  if(hotflow_time - last_hotflow_time > hotflow_interval){  //função só calcula a vazão em um intervalo de tempo e não a todo tempo
+    last_hotflow_time = hotflow_time; // atualiza tempo para próxima execução
     microsec = ultrasonic.timing();
     cmMsec = ultrasonic.convert(microsec, Ultrasonic::CM);
     nivel = 11.46 - cmMsec;
-    vazao1_sf = (0.0537) * pow((nivel * 10), 1.4727);
-    if (vazao1_sf > 1) {
-      vazao_quente = 0.95 * vazao_quente + 0.05* vazao1_sf;
+    raw_coldflow_value = (0.0537) * pow((nivel * 10), 1.4727);
+    if (raw_coldflow_value > 1) {
+      vazao_quente = 0.95 * vazao_quente + 0.05 * raw_coldflow_value;
     }
-    
-    /*if(millis() - start_time < 5000){
-      hotflow_filtered = vazao_quente;
-    }
-    else{
-      //filtro de primeira ordem
-      hotflow_filtered = alpha*hotflow_filtered + (1-alpha)*vazao_quente;
-    }*/
-
-    result_hotflow_time = micros() - start_hotflow_time;
   }
-}
-
-void Temperaturas2() {
-  LM35_value = analogRead(LM35_PIN) * 0.48875855;
-  LDR_value = analogRead(LDR_PIN) / 10.0;
-  temp[0] = LM35_value;
-  temp[1] = LDR_value;
 }
 
 void Simulator() {
@@ -567,14 +466,12 @@ void Simulator() {
 
     simulator_time_elapsed = current_sim_time;
 
-    temp[0] = mapfloat(waveformsTable[0][indexwave], 0, 4095, 0, 50);
-    
-    for (int i = 1; i < 4; ++i) {
+    for (int i = 0; i < 3; ++i) {
       temp[i] = mapfloat(random(1024), 0, 1023, 10, 50);
     }
 
     //ultima temperatura com valor senoidal
-    
+    temp[3] = mapfloat(waveformsTable[0][indexwave], 0, 4095, 0, 50);
     indexwave++;
     if (indexwave == maxSamplesNum) {
       indexwave = 0;// Reset the counter to repeat the wave
@@ -600,20 +497,16 @@ void ReadPotentiometer() {
 
 void runReads() {
   
-    //Temperaturas();
     VazaoAguaFria();
     VazaoAguaQuente();
-    new_Temperaturas();
+    Temperaturas();
   
-  //Temperaturas2();
-   //Simulator();
 }
 
 
 //funções callback do i2c
 void receiveEvent(int Nbytes) {
 
-  start_command_time = micros();
   command = Wire.read();
 
   switch (command) {
@@ -621,14 +514,12 @@ void receiveEvent(int Nbytes) {
       //comando liga bomba
       digitalWrite(inversor_rele, LOW); //o estado da bomba é invertido
       pump_onoff = 1;
-      result_command_time = micros() - start_command_time;
       break;
 
     case 50:
       //comando desliga bomba
       digitalWrite(inversor_rele, HIGH);
       pump_onoff = 0;
-      result_command_time = micros() - start_command_time;
       break;
 
     case 51:
@@ -636,7 +527,6 @@ void receiveEvent(int Nbytes) {
       digitalWrite(heater_rele, HIGH);
       digitalWrite(led_heater, HIGH);
       heater_onoff = 1;
-      result_command_time = micros() - start_command_time;
       break;
 
     case 52:
@@ -644,7 +534,6 @@ void receiveEvent(int Nbytes) {
       digitalWrite(heater_rele, LOW);
       digitalWrite(led_heater, LOW);
       heater_onoff = 0;
-      result_command_time = micros() - start_command_time;
       break;
 
     case 53:
@@ -655,24 +544,13 @@ void receiveEvent(int Nbytes) {
         i = i + 1;
       }
       parseSpeed(data);
-      result_command_time = micros() - start_command_time;
       break;
   }
-
 }
 
 void requestEvent() {
   if (command == 54) {
-    start_send_time = micros();
     Wire.write(send_info.I2C_packet, sizeof(processData));
-    
-    /*for(int i=0; i<30 ; i++){
-      Serial.print(send_info.I2C_packet[i]);
-      Serial.print(" ");
-    }
-    Serial.println("");*/
-    
-    result_send_time = micros() - start_send_time;
   }
 }
 
@@ -683,17 +561,15 @@ void parseSpeed(byte data[]) {
   speed.bspeed[1] = data[2];
   speed.bspeed[2] = data[3];
   speed.bspeed[3] = data[4];
-  //Serial.println(speed.fspeed);
   remote_pumpspeed = speed.fspeed;
   PumpSpeed(remote_pumpspeed); //envia o comando de velocidade para a bomba fisicamente
 }
 
 void refresh_I2C_Packet() {
-  start_operation_time = micros();
-  send_info.data.temp1 = temp_buffer[0];  //temp_buffer[0];
-  send_info.data.temp2 = temp_buffer[1];  //temp_buffer[1];
-  send_info.data.temp3 = temp_buffer[2];  //temp_buffer[2];
-  send_info.data.temp4 = temp_buffer[3];  //temp_buffer[3];
+  send_info.data.temp1 = temp_buffer[0];  
+  send_info.data.temp2 = temp_buffer[1];  
+  send_info.data.temp3 = temp_buffer[2];  
+  send_info.data.temp4 = temp_buffer[3]; 
 
   //se a bomba estiver desligada, ignorar o valor do potenciometro
   if (pump_onoff) {
@@ -709,13 +585,12 @@ void refresh_I2C_Packet() {
   }
 
 
-  send_info.data.hotflow = vazao_quente;   //vazao_quente -> hotflow_buffer
-  send_info.data.coldflow = vazao_fria;      //vazao_fria -> coldflow_buffer
+  send_info.data.hotflow = vazao_quente;   
+  send_info.data.coldflow = vazao_fria;    
   bitWrite(send_info.data.bstatus, 0, pump_onoff);
   bitWrite(send_info.data.bstatus, 1, heater_onoff);
   bitWrite(send_info.data.bstatus, 2, switch_state);
   bitWrite(send_info.data.bstatus, 3, emergency_status);
-  result_operation_time = micros() - start_operation_time;
 }
 
 void Remove_TempSpike(float *temp_buffer, float temps[]){
@@ -724,64 +599,10 @@ void Remove_TempSpike(float *temp_buffer, float temps[]){
     if(temps[i]==- 127){ //valor ruim, deve ser mantido o valor anterior
       temp_errors++;
     }
-    else{ //valor ok
+    else{ 
       temp_buffer[i] = temps[i]; //pega o valor atual
     }
   } 
-}
-/*
-Funções de anti-spike comentadas porque essas funções não fizeram tanta diferença
-*/
-
-float Remove_ColdFlowSpike(float value){
-  if(value < 0){
-    coldflow_errors++;
-    return(abs(value)); //único spike observado foi o valor vir negativo
-  }
-  else{
-    return(value);
-  }
-}
-
-
-float Remove_HotFlowSpike(float value){
-  if(abs(value - hotflow_buffer) > 5){
-    hotflow_errors++;
-    return(hotflow_buffer); //mantem o valor anterior)
-  }
-  else{
-    return(value);
-  }
-  
-}
-
-void PrintStatitics(){
-  if(millis() - statitics_time > statitics_interval){
-
-    statitics_time = millis();
-    
-    Serial.print(result_temp_time);
-    Serial.print(" ");
-    Serial.print(result_hotflow_time);
-    Serial.print(" ");
-    Serial.print(result_coldflow_time);
-    Serial.print(" ");
-    Serial.print(result_operation_time);
-    Serial.print(" ");
-    Serial.print(result_command_time);
-    Serial.print(" ");
-    Serial.print(result_send_time);
-    Serial.print(" ");
-    Serial.print(result_total_time);
-    Serial.print("/");
-    Serial.print(temp_errors);
-    Serial.print(" ");
-    Serial.print(hotflow_errors);
-    Serial.print(" ");
-    Serial.print(coldflow_errors);
-    Serial.print(" ");
-    Serial.println("");
-  }
 }
 
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max) {
